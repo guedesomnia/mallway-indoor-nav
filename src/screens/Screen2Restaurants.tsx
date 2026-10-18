@@ -4,6 +4,7 @@ import { StatusBar } from '../components/StatusBar';
 import { AppHeader } from '../components/AppHeader';
 import { Restaurant } from '../data/restaurants';
 import { BuildingMap, UserProfile, CategoryType } from '../types/map';
+import { haptics } from '../utils/haptics';
 
 interface Screen2RestaurantsProps {
   entranceId: string;
@@ -88,8 +89,11 @@ export const Screen2Restaurants: React.FC<Screen2RestaurantsProps> = ({
       <div className="px-4 pt-2.5 pb-1">
         <div className="bg-gray-100 p-1 rounded-2xl flex items-center gap-1 text-xs font-bold">
           <button
-            onClick={() => onToggleProfile('courier')}
-            className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
+            onClick={() => {
+              haptics.light();
+              onToggleProfile('courier');
+            }}
+            className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
               userProfile === 'courier'
                 ? 'bg-emerald-600 text-white shadow-sm'
                 : 'text-gray-500 hover:text-gray-900'
@@ -100,8 +104,11 @@ export const Screen2Restaurants: React.FC<Screen2RestaurantsProps> = ({
           </button>
 
           <button
-            onClick={() => onToggleProfile('customer')}
-            className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
+            onClick={() => {
+              haptics.light();
+              onToggleProfile('customer');
+            }}
+            className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
               userProfile === 'customer'
                 ? 'bg-blue-600 text-white shadow-sm'
                 : 'text-gray-500 hover:text-gray-900'
@@ -129,8 +136,11 @@ export const Screen2Restaurants: React.FC<Screen2RestaurantsProps> = ({
             </div>
           </div>
           <button
-            onClick={onChangeEntrance}
-            className="flex items-center gap-1 text-emerald-700 text-xs font-bold hover:text-emerald-900 transition-colors shrink-0 ml-2"
+            onClick={() => {
+              haptics.light();
+              onChangeEntrance();
+            }}
+            className="flex items-center gap-1 text-emerald-700 text-xs font-bold hover:text-emerald-900 transition-colors shrink-0 ml-2 cursor-pointer"
           >
             <RefreshCw size={12} />
             Trocar
@@ -157,8 +167,11 @@ export const Screen2Restaurants: React.FC<Screen2RestaurantsProps> = ({
         {categories.map(cat => (
           <button
             key={cat.id}
-            onClick={() => setSelectedCategory(cat.id)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+            onClick={() => {
+              haptics.light();
+              setSelectedCategory(cat.id);
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
               selectedCategory === cat.id
                 ? 'bg-gray-900 text-white shadow-xs'
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -186,8 +199,11 @@ export const Screen2Restaurants: React.FC<Screen2RestaurantsProps> = ({
           return (
             <button
               key={restaurant.id}
-              onClick={() => onSelectRestaurant(restaurant)}
-              className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left"
+              onClick={() => {
+                haptics.light();
+                onSelectRestaurant(restaurant);
+              }}
+              className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left cursor-pointer"
             >
               <LogoBadge r={restaurant} />
               <div className="flex-1 min-w-0">

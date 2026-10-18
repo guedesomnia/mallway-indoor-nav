@@ -29,6 +29,8 @@ import { BANGU_SHOPPING_MAP } from './data/banguMap';
 import { BARRA_SHOPPING_MAP } from './data/barraMap';
 import { NORTE_SHOPPING_MAP } from './data/norteMap';
 import { BuildingMap, UserProfile } from './types/map';
+import { PWAInstallPrompt } from './components/PWAInstallPrompt';
+import { haptics } from './utils/haptics';
 
 export type AppSystemMode = 'master' | 'mall_admin' | 'client_app';
 
@@ -65,6 +67,15 @@ const StepDots = ({ current, total, labels }: { current: number; total: number; 
 export function App() {
   // 1. MODO GERAL DO SISTEMA: Master (Equipe) vs Admin do Shopping vs App do Usuário
   const [systemMode, setSystemMode] = useState<AppSystemMode>(() => {
+    const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const urlMode = params?.get('mode');
+    if (urlMode === 'master' || urlMode === 'mall_admin' || urlMode === 'client_app') {
+      return urlMode;
+    }
+    // Se for dispositivo móvel (< 768px) ou vier com parâmetros de app/qr, abre direto no App do Cliente!
+    if (typeof window !== 'undefined' && (window.innerWidth < 768 || params?.get('app') || params?.get('qr') || params?.get('entrance') || params?.get('mall'))) {
+      return 'client_app';
+    }
     const saved = localStorage.getItem('active_system_mode_v4');
     return (saved as AppSystemMode) || 'master';
   });
@@ -92,6 +103,9 @@ export function App() {
 
   // 3. SHOPPING ATIVO SELECIONADO
   const [activeShoppingId, setActiveShoppingId] = useState<string>(() => {
+    const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const urlMall = params?.get('mall');
+    if (urlMall) return urlMall;
     const saved = localStorage.getItem('active_shopping_id_v4');
     return saved || 'bangu-shopping-oficial';
   });
@@ -116,12 +130,21 @@ export function App() {
   
   // Entrada ativa (primeira do shopping ou padrão)
   const [entranceId, setEntranceId] = useState<string>(() => {
+    const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const urlEntrance = params?.get('entrance');
+    if (urlEntrance) return urlEntrance;
     const firstEnt = activeShopping.nodes.find(n => n.type === 'entrance');
     return firstEnt?.id || 'node-ent-feira';
   });
 
   // Atualizar entrada quando trocar de shopping
   useEffect(() => {
+    const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const urlEntrance = params?.get('entrance');
+    if (urlEntrance && activeShopping.nodes.some(n => n.id === urlEntrance)) {
+      setEntranceId(urlEntrance);
+      return;
+    }
     const firstEnt = activeShopping.nodes.find(n => n.type === 'entrance');
     if (firstEnt) {
       setEntranceId(firstEnt.id);
@@ -158,7 +181,49 @@ export function App() {
   const screenFlow: AppScreen[] = ['qr', 'restaurants', 'detail', 'map', 'steps', 'arrived'];
   const screenLabels = ['QR Code', 'Lojas / Food', 'Detalhes', 'Waze Indoor', 'Passo a Passo', 'Chegada'];
   const currentIdx = screenFlow.indexOf(screen);
-  const goTo = (s: AppScreen) => setScreen(s);
+  const goTo = (s: AppScreen) => {
+    haptics.light();
+    setScreen(s);
+  };
+
+  // Deep linking automático ao ler QR Codes reais com parâmetros de loja ou entrada
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const storeParam = params.get('store');
+    const entranceParam = params.get('entrance');
+
+    if (storeParam) {
+      const foundStore = activeShopping.units.find(u => 
+        u.id.toLowerCase() === storeParam.toLowerCase() ||
+        u.name.toLowerCase().includes(storeParam.toLowerCase())
+      );
+      if (foundStore) {
+        setSelectedRestaurant({
+          id: foundStore.id,
+          name: foundStore.name,
+          logo: foundStore.logo || '🛍️',
+          bgColor: foundStore.bgColor || foundStore.color || '#1e293b',
+          logoColor: foundStore.logoColor || '#ffffff',
+          location: foundStore.sector || 'Piso Principal',
+          floor: activeShopping.floors.find(f => f.id === foundStore.floorId)?.name || 'Térreo',
+          sector: foundStore.sector || 'Geral',
+          distance: foundStore.distance || 140,
+          storeNumber: foundStore.code || 'Loja',
+          pickupInstructions: [
+            foundStore.courierPickup?.notes || 'Balcão de retirada com identificação',
+            'Apresente o código do pedido ao atendente'
+          ],
+          courierInfo: foundStore.courierPickup?.notes || 'Balcão de atendimento',
+          totalRoutes: 84,
+          routeSteps: []
+        });
+        setScreen('detail');
+      }
+    } else if (entranceParam) {
+      setScreen('restaurants');
+    }
+  }, [activeShopping]);
 
   // Manipuladores de Atualização de Shopping pelo Admin
   const handleUpdateCurrentShopping = (updatedMap: BuildingMap) => {
@@ -343,8 +408,8 @@ export function App() {
   // ==========================================
   return (
     <div className="min-h-screen flex flex-col items-center justify-start bg-gradient-to-br from-slate-100 via-emerald-50/30 to-slate-100">
-      {/* Top bar de Navegação do Sistema */}
-      <div className="w-full bg-white/90 backdrop-blur border-b border-gray-200 px-6 py-3 flex items-center justify-between sticky top-0 z-50 shadow-xs">
+      {/* Top bar de Navegação do Sistema (Desktop) */}
+      <div className="hidden md:flex w-full bg-white/90 backdrop-blur border-b border-gray-200 px-6 py-3 items-center justify-between sticky top-0 z-50 shadow-xs">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 bg-emerald-600 rounded-xl flex items-center justify-center shadow-sm">
             <span className="text-white text-xs font-black">
@@ -376,7 +441,7 @@ export function App() {
                   setActiveShoppingId(shop.id);
                   goTo('qr');
                 }}
-                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
                   activeShoppingId === shop.id
                     ? 'bg-white text-emerald-700 shadow-xs'
                     : 'text-gray-500 hover:text-gray-900'
@@ -412,7 +477,7 @@ export function App() {
           {/* Botão para Gerência / Admin */}
           <button
             onClick={() => setSystemMode('mall_admin')}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 text-white text-xs font-bold rounded-xl hover:bg-slate-800 transition-colors shadow-sm"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 text-white text-xs font-bold rounded-xl hover:bg-slate-800 transition-colors shadow-sm cursor-pointer"
           >
             <ShieldCheck size={14} className="text-emerald-400" />
             <span className="hidden sm:inline">Gerenciar Shopping</span>
@@ -421,7 +486,7 @@ export function App() {
           {/* Botão para Dashboard Master */}
           <button
             onClick={() => setSystemMode('master')}
-            className="hidden md:flex items-center gap-1.5 px-3 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-200 transition-colors border border-slate-200"
+            className="hidden md:flex items-center gap-1.5 px-3 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-200 transition-colors border border-slate-200 cursor-pointer"
           >
             <Layers size={14} />
             <span>Console Master</span>
@@ -429,8 +494,38 @@ export function App() {
         </div>
       </div>
 
+      {/* Barra Compacta para Celulares Reais (iPhone / Android) */}
+      <div className="md:hidden w-full bg-slate-950/95 backdrop-blur-md px-3.5 py-2 flex items-center justify-between border-b border-slate-800 text-white z-40 shrink-0">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="font-black text-xs text-white">{activeShopping.name.split(' ')[0]}</span>
+          <span className="text-[10px] text-slate-400 font-medium">Wayfinding</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <select
+            value={activeShoppingId}
+            onChange={(e) => {
+              setActiveShoppingId(e.target.value);
+              goTo('qr');
+            }}
+            className="bg-slate-900 text-slate-200 font-bold text-[10px] rounded-lg px-2 py-1 border border-slate-700 outline-none"
+          >
+            {shoppings.map(s => (
+              <option key={s.id} value={s.id}>{s.name.split(' ')[0]}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => setSystemMode('mall_admin')}
+            className="p-1.5 bg-slate-800 text-emerald-400 rounded-lg text-xs"
+            title="Painel Admin"
+          >
+            <ShieldCheck size={14} />
+          </button>
+        </div>
+      </div>
+
       {/* Frame Mobile + Painel Lateral de Controle */}
-      <div className="flex-1 w-full flex items-start justify-center px-2 sm:px-4 py-4 md:py-8">
+      <div className="flex-1 w-full flex items-start justify-center p-0 md:px-4 md:py-8">
         <div className="flex flex-col lg:flex-row items-start justify-center gap-6 w-full max-w-6xl">
           {/* Menu de Etapas do Usuário (Esquerda) */}
           <div className="hidden lg:flex flex-col gap-1 w-44 sticky top-24 mt-4">
@@ -532,8 +627,8 @@ export function App() {
                   </div>
                 ) : null}
 
-                {/* Telas do App */}
-                <div style={{ height: 750, overflowY: screen === 'map' ? 'hidden' : 'auto', overflowX: 'hidden' }}>
+                {/* Telas do App com altura responsiva */}
+                <div className="phone-content-area" style={{ overflowY: screen === 'map' ? 'hidden' : 'auto' }}>
                   {screen === 'qr' && (
                     <Screen1QR
                       buildingMap={activeShopping}
@@ -601,6 +696,7 @@ export function App() {
                     }}
                   />
                 )}
+                </div>
               </div>
             </div>
           </div>
@@ -749,6 +845,9 @@ export function App() {
           </div>
         </div>
       )}
+
+      {/* Banner de Instalação PWA Nativa (iPhone / Android) */}
+      <PWAInstallPrompt />
     </div>
   );
 }

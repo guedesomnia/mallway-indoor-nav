@@ -3,6 +3,7 @@ import { CheckCircle, Bike, DoorOpen, Truck, ChevronRight } from 'lucide-react';
 import { StatusBar } from '../components/StatusBar';
 import { AppHeader } from '../components/AppHeader';
 import { Restaurant } from '../data/restaurants';
+import { haptics } from '../utils/haptics';
 
 interface Screen6ArrivedProps {
   restaurant: Restaurant;
@@ -99,7 +100,13 @@ export const Screen6Arrived: React.FC<Screen6ArrivedProps> = ({
         <ArrivalBanner restaurant={restaurant} />
 
         {/* Pickup button */}
-        <button onClick={onPickedUp} className="btn-primary text-lg py-5">
+        <button 
+          onClick={() => {
+            haptics.success();
+            onPickedUp();
+          }} 
+          className="btn-primary text-lg py-5 cursor-pointer shadow-lg shadow-emerald-600/30 active:scale-[0.99] transition-transform"
+        >
           ✅ Peguei o pedido
         </button>
 
@@ -113,7 +120,10 @@ export const Screen6Arrived: React.FC<Screen6ArrivedProps> = ({
               icon={<Bike size={18} className="text-gray-600" />}
               title="Estacionamento de motos (Rua da Feira)"
               subtitle="Retorno rápido para saída de delivery"
-              onClick={onNewDelivery}
+              onClick={() => {
+                haptics.light();
+                onNewDelivery();
+              }}
             />
             <ExitOption
               icon={<DoorOpen size={18} className="text-gray-600" />}

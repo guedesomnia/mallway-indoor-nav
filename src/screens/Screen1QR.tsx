@@ -15,6 +15,7 @@ import { AppHeader } from '../components/AppHeader';
 import { ENTRANCES } from '../data/restaurants';
 import { BuildingMap } from '../types/map';
 import { audioNav } from '../utils/audioNavigation';
+import { haptics } from '../utils/haptics';
 
 interface Screen1QRProps {
   onScanned: (entranceId: string) => void;
@@ -147,6 +148,7 @@ export const Screen1QR: React.FC<Screen1QRProps> = ({
 
     setHasScannedSuccess(true);
     setScannedLabel(matched.name);
+    haptics.success();
     audioNav.playChime('arrival');
     audioNav.speak(`QR Code reconhecido! Você está na ${matched.name}. Carregando mapa.`);
 

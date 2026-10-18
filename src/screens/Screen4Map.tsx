@@ -26,6 +26,7 @@ import { calculateIndoorRoute } from '../utils/pathfinding';
 import { InteractiveMapCanvas } from '../components/InteractiveMapCanvas';
 import { useIndoorNavigation } from '../utils/useIndoorNavigation';
 import { audioNav } from '../utils/audioNavigation';
+import { haptics } from '../utils/haptics';
 
 interface Screen4MapProps {
   restaurant: Restaurant;
@@ -86,13 +87,15 @@ export const Screen4Map: React.FC<Screen4MapProps> = ({
   };
 
   // =========================================================================
-  // PASSO 1: DISPARO DE VOZ E CHIMES SONOROS AUTOMÁTICOS
+  // PASSO 1: DISPARO DE VOZ, CHIMES SONOROS E HAPTIC FEEDBACK AUTOMÁTICOS
   // =========================================================================
   useEffect(() => {
     if (nav.hasArrived) {
+      haptics.success();
       audioNav.playChime('arrival');
       audioNav.speak(`Você chegou ao seu destino! ${restaurant.name}.`, true);
     } else {
+      haptics.turn();
       audioNav.playChime('turn');
       const textToSpeak = `${currentInstruction.title}. ${currentInstruction.description}`;
       audioNav.speak(textToSpeak);
@@ -380,47 +383,83 @@ export const Screen4Map: React.FC<Screen4MapProps> = ({
           </div>
         </div>
 
-        {/* Controles de Simulação & Sensores do Celular */}
-        <div className="grid grid-cols-3 gap-2 pt-3">
-          {/* Botão Play / Pause (Simular Caminhada) */}
-          <button
-            onClick={() => nav.isSimulating ? nav.pauseSimulation() : nav.startSimulation()}
-            className={`py-2.5 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-              nav.isSimulating
-                ? 'bg-amber-600/30 text-amber-300 border border-amber-500/50'
-                : 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-lg shadow-cyan-600/25'
-            }`}
-          >
-            {nav.isSimulating ? <Pause size={14} /> : <Play size={14} />}
-            {nav.isSimulating ? 'Pausar' : 'Andar (Waze)'}
-          </button>
+        {/* Controles de Simulação & Velocidade */}
+        <div className="pt-2.5 space-y-2">
+          {/* Linha de Velocidade do Waze */}
+          <div className="flex items-center justify-between px-1 text-[11px]">
+            <span className="text-slate-400 font-medium">Velocidade de Teste:</span>
+            <div className="flex items-center gap-1 bg-slate-800 p-0.5 rounded-lg border border-slate-700/60">
+              {[1.0, 1.5, 2.5].map((speed) => (
+                <button
+                  key={speed}
+                  onClick={() => {
+                    haptics.light();
+                    nav.setSimulationSpeed(speed);
+                  }}
+                  className={`px-2 py-0.5 rounded-md font-bold transition-all text-[10px] ${
+                    nav.simulationSpeed === speed
+                      ? 'bg-cyan-500 text-slate-950 shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {speed}x
+                </button>
+              ))}
+            </div>
+          </div>
 
-          {/* Botão Dar 1 Passo (+1m manual para teste rápido) */}
-          <button
-            onClick={() => {
-              nav.stepForward(2.0);
-              audioNav.playChime('step');
-            }}
-            className="py-2.5 px-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-            title="Avança 2 metros no corredor"
-          >
-            <Footprints size={14} className="text-cyan-400" />
-            +1 Passo
-          </button>
+          <div className="grid grid-cols-3 gap-2">
+            {/* Botão Play / Pause (Simular Caminhada) */}
+            <button
+              onClick={() => {
+                haptics.medium();
+                if (nav.isSimulating) {
+                  nav.pauseSimulation();
+                } else {
+                  nav.startSimulation();
+                }
+              }}
+              className={`py-2 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                nav.isSimulating
+                  ? 'bg-amber-600/30 text-amber-300 border border-amber-500/50'
+                  : 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-lg shadow-cyan-600/25'
+              }`}
+            >
+              {nav.isSimulating ? <Pause size={14} /> : <Play size={14} />}
+              {nav.isSimulating ? 'Pausar' : 'Andar (Waze)'}
+            </button>
 
-          {/* Botão Ativar Acelerômetro Real */}
-          <button
-            onClick={nav.requestSensorPermission}
-            className={`py-2.5 px-2 rounded-xl text-xs font-bold border flex items-center justify-center gap-1 transition-colors cursor-pointer ${
-              nav.sensorActive
-                ? 'bg-emerald-950/60 text-emerald-400 border-emerald-500/50'
-                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
-            }`}
-            title="Usa o acelerômetro real do smartphone"
-          >
-            <Smartphone size={14} className={nav.sensorActive ? 'text-emerald-400' : 'text-slate-400'} />
-            {nav.sensorActive ? 'Sensores ON' : 'Sensores Cel.'}
-          </button>
+            {/* Botão Dar 1 Passo (+1m manual para teste rápido) */}
+            <button
+              onClick={() => {
+                haptics.step();
+                nav.stepForward(2.0);
+                audioNav.playChime('step');
+              }}
+              className="py-2 px-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              title="Avança 2 metros no corredor"
+            >
+              <Footprints size={14} className="text-cyan-400" />
+              +1 Passo
+            </button>
+
+            {/* Botão Ativar Acelerômetro Real */}
+            <button
+              onClick={() => {
+                haptics.light();
+                nav.requestSensorPermission();
+              }}
+              className={`py-2 px-2 rounded-xl text-xs font-bold border flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+                nav.sensorActive
+                  ? 'bg-emerald-950/60 text-emerald-400 border-emerald-500/50'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+              }`}
+              title="Usa o acelerômetro real do smartphone"
+            >
+              <Smartphone size={14} className={nav.sensorActive ? 'text-emerald-400' : 'text-slate-400'} />
+              {nav.sensorActive ? 'Sensores ON' : 'Sensores Cel.'}
+            </button>
+          </div>
         </div>
 
         {/* Botão Próximo / Detalhes */}

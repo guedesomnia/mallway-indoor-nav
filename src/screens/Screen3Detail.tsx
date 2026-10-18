@@ -3,6 +3,7 @@ import { MapPin, Clock, CheckCircle, Navigation, Bike, User, Sparkles, AlertCirc
 import { StatusBar } from '../components/StatusBar';
 import { Restaurant } from '../data/restaurants';
 import { UserProfile } from '../types/map';
+import { haptics } from '../utils/haptics';
 
 interface Screen3DetailProps {
   restaurant: Restaurant;
@@ -88,8 +89,11 @@ export const Screen3Detail: React.FC<Screen3DetailProps> = ({
         <RestaurantBanner restaurant={restaurant} mallName={mallName} />
         {/* Botão Voltar */}
         <button
-          onClick={onBack}
-          className="absolute top-3 left-3 w-9 h-9 bg-black/40 hover:bg-black/60 backdrop-blur-md rounded-full flex items-center justify-center text-white text-lg font-bold border border-white/20 shadow-md transition-colors z-20"
+          onClick={() => {
+            haptics.light();
+            onBack();
+          }}
+          className="absolute top-3 left-3 w-9 h-9 bg-black/40 hover:bg-black/60 backdrop-blur-md rounded-full flex items-center justify-center text-white text-lg font-bold border border-white/20 shadow-md transition-colors z-20 cursor-pointer"
         >
           ‹
         </button>
@@ -198,7 +202,10 @@ export const Screen3Detail: React.FC<Screen3DetailProps> = ({
       {/* CTA de Iniciar Rota */}
       <div className="p-4 pb-6 bg-white border-t border-gray-100 shadow-lg">
         <button 
-          onClick={onStartRoute} 
+          onClick={() => {
+            haptics.medium();
+            onStartRoute();
+          }} 
           className="w-full flex items-center justify-center gap-2.5 py-3.5 px-4 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-extrabold text-sm rounded-2xl shadow-lg shadow-emerald-600/30 transition-all cursor-pointer"
         >
           <Navigation size={18} className="animate-bounce" />
