@@ -1,0 +1,22 @@
+{
+  "name": "MallWay Pro - Geolocalização Indoor & Delivery",
+  "short_name": "MallWay",
+  "description": "Sistema de micro-geolocalização e rotas indoor tipo Waze para shoppings, entregadores e clientes.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}
