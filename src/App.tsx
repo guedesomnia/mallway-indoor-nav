@@ -126,7 +126,15 @@ export function App() {
   const [deviceMockup, setDeviceMockup] = useState<'iphone' | 'android' | 'responsive'>('iphone');
   const [isMobileQrModalOpen, setIsMobileQrModalOpen] = useState<boolean>(false);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
-  const mobileLanUrl = 'http://192.168.0.52:5174';
+  const mobileLanUrl = useMemo(() => {
+    if (typeof window !== 'undefined') {
+      const port = window.location.port || '5174';
+      if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        return `${window.location.protocol}//${window.location.hostname}${port ? `:${port}` : ''}`;
+      }
+    }
+    return 'http://10.145.221.230:5174';
+  }, []);
   
   // Entrada ativa (primeira do shopping ou padrão)
   const [entranceId, setEntranceId] = useState<string>(() => {
@@ -776,36 +784,16 @@ export function App() {
               </button>
             </div>
 
-            {/* QR Code de Alta Nitidez para o IP Local */}
+            {/* QR Code Real de Alta Nitidez para o IP Local */}
             <div className="bg-white p-4 rounded-2xl flex flex-col items-center justify-center shadow-inner">
-              <div className="w-44 h-44 relative">
-                <svg viewBox="0 0 100 100" className="w-full h-full">
-                  <rect width="100" height="100" fill="white" />
-                  <rect x="5" y="5" width="26" height="26" fill="black" rx="2" />
-                  <rect x="9" y="9" width="18" height="18" fill="white" rx="1" />
-                  <rect x="13" y="13" width="10" height="10" fill="black" rx="1" />
-                  <rect x="69" y="5" width="26" height="26" fill="black" rx="2" />
-                  <rect x="73" y="9" width="18" height="18" fill="white" rx="1" />
-                  <rect x="77" y="13" width="10" height="10" fill="black" rx="1" />
-                  <rect x="5" y="69" width="26" height="26" fill="black" rx="2" />
-                  <rect x="9" y="73" width="18" height="18" fill="white" rx="1" />
-                  <rect x="13" y="77" width="10" height="10" fill="black" rx="1" />
-                  {[40,44,48,52,56,60].map((x, i) => (
-                    <React.Fragment key={i}>
-                      <rect x={x} y="5" width="3" height="3" fill={i % 2 === 0 ? 'black' : 'white'} />
-                      <rect x={x} y="92" width="3" height="3" fill={i % 3 === 0 ? 'black' : 'white'} />
-                      <rect x="5" y={x} width="3" height="3" fill={i % 2 !== 0 ? 'black' : 'white'} />
-                      <rect x="92" y={x} width="3" height="3" fill={i % 3 !== 0 ? 'black' : 'white'} />
-                    </React.Fragment>
-                  ))}
-                  {[40,44,48,52,56,60,64,68].map((x, i) => (
-                    [40,44,48,52,56,60,64,68].map((y, j) => (
-                      (i + j) % 3 !== 0 && <rect key={`qr-${i}-${j}`} x={x} y={y} width="3" height="3" fill="black" />
-                    ))
-                  ))}
-                </svg>
+              <div className="w-48 h-48 bg-white p-2 rounded-xl border border-slate-200 flex items-center justify-center">
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(mobileLanUrl)}&margin=1`}
+                  alt={`QR Code para ${mobileLanUrl}`}
+                  className="w-full h-full object-contain"
+                />
               </div>
-              <span className="text-slate-800 font-mono text-[11px] font-bold mt-2">
+              <span className="text-slate-800 font-mono text-xs font-bold mt-2.5">
                 {mobileLanUrl}
               </span>
             </div>
