@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { adminApi } from '../api/admin';
+import { ApiError } from '../api/http';
 import { 
   BuildingMap, 
   StoreUnit, 
@@ -58,21 +60,30 @@ export const MapStudioEditor: React.FC<MapStudioEditorProps> = ({
   const [courierWindowName, setCourierWindowName] = useState('Balcão de Motoboy');
   const [courierNotes, setCourierNotes] = useState('');
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [uploading, setUploading] = useState(false);
+
+  // A planta vai para o servidor (convertida para WebP e com nome por hash). Nunca embutida no JSON do mapa.
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const base64 = event.target?.result as string;
-        const updatedFloors = buildingMap.floors.map(f => {
-          if (f.id === activeFloorId) {
-            return { ...f, backgroundImage: base64, backgroundOpacity: 0.35 };
-          }
-          return f;
-        });
-        onUpdateMap({ ...buildingMap, floors: updatedFloors });
-      };
-      reader.readAsDataURL(file);
+    e.target.value = '';
+    if (!file || uploading) return;
+    setUploading(true);
+    try {
+      const res = await adminApi.uploadImage(buildingMap.id, file);
+      const floor = buildingMap.floors.find(f => f.id === activeFloorId);
+      onUpdateMap({
+        ...buildingMap,
+        floors: buildingMap.floors.map(f =>
+          f.id === activeFloorId ? { ...f, backgroundImage: res.url, backgroundOpacity: f.backgroundOpacity ?? 0.35 } : f
+        )
+      });
+      if (floor && Math.abs((res.width / res.height) / (floor.width / floor.height) - 1) > 0.03) {
+        alert('Atenção: a proporção desta planta é diferente da área do mapa. Ajuste a largura/altura do piso ou o desenho ficará distorcido.');
+      }
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : 'Falha ao enviar a imagem.');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -81,8 +92,10 @@ export const MapStudioEditor: React.FC<MapStudioEditorProps> = ({
 
     const doorPoint = { ...draftPoints[0] };
 
+    const stamp = Date.now();
     const newUnit: StoreUnit = {
-      id: `unit-${Date.now()}`,
+      id: `unit-${stamp}`,
+      doorNodeId: `node-${stamp}`,
       floorId: activeFloorId,
       name: newStoreName.trim(),
       code: newStoreCode.trim() || undefined,
@@ -98,7 +111,7 @@ export const MapStudioEditor: React.FC<MapStudioEditorProps> = ({
     };
 
     const newNode: WayNode = {
-      id: `node-${Date.now()}`,
+      id: `node-${stamp}`,
       floorId: activeFloorId,
       x: doorPoint.x,
       y: doorPoint.y,
@@ -122,6 +135,7 @@ export const MapStudioEditor: React.FC<MapStudioEditorProps> = ({
 
   const handleDeleteSelectedUnit = () => {
     if (!selectedUnit) return;
+    if (!confirm(`Remover a loja "${selectedUnit.name}" do mapa?`)) return;
     onUpdateMap({
       ...buildingMap,
       units: buildingMap.units.filter(u => u.id !== selectedUnit.id)
@@ -146,8 +160,12 @@ export const MapStudioEditor: React.FC<MapStudioEditorProps> = ({
       reader.onload = (event) => {
         try {
           const parsed = JSON.parse(event.target?.result as string);
-          if (parsed.floors && parsed.units && parsed.nodes) {
-            onUpdateMap(parsed);
+          if (Array.isArray(parsed.floors) && Array.isArray(parsed.units) && Array.isArray(parsed.nodes) && Array.isArray(parsed.edges)) {
+            if (confirm(`Substituir TODO o mapa atual por "${parsed.name ?? file.name}"? Você poderá desfazer recarregando do servidor antes de publicar.`)) {
+              onUpdateMap({ ...parsed, id: buildingMap.id });
+            }
+          } else {
+            alert('Este JSON não é um mapa válido (faltam pisos, lojas, pontos ou conexões).');
           }
         } catch {
           alert('Arquivo JSON inválido.');
@@ -166,7 +184,7 @@ export const MapStudioEditor: React.FC<MapStudioEditorProps> = ({
               <Pencil className="w-4 h-4" />
             </span>
             <h3 className="font-bold text-xs text-white uppercase tracking-wider">
-              Map Studio • BarraShopping
+              Map Studio • {buildingMap.name}
             </h3>
           </div>
           <button
@@ -174,7 +192,7 @@ export const MapStudioEditor: React.FC<MapStudioEditorProps> = ({
             className="text-[11px] text-slate-400 hover:text-slate-200 flex items-center gap-1 hover:underline"
           >
             <RotateCcw className="w-3 h-3" />
-            Restaurar
+            Descartar e recarregar
           </button>
         </div>
 

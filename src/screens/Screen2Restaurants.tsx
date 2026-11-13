@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Search, ChevronRight, MapPin, RefreshCw, Bike, ShoppingBag, Filter } from 'lucide-react';
 import { StatusBar } from '../components/StatusBar';
 import { AppHeader } from '../components/AppHeader';
-import { Restaurant } from '../data/restaurants';
-import { BuildingMap, UserProfile, CategoryType } from '../types/map';
+import type { Restaurant } from '../types/restaurant';
+import type { BuildingMap, UserProfile } from '../types/map';
 import { haptics } from '../utils/haptics';
+import { routeDistancesFrom } from '../utils/pathfinding';
+import { resolveUnitDoorNode } from '../utils/mapRules';
+import { unitToRestaurant } from '../utils/restaurantFromUnit';
 
 interface Screen2RestaurantsProps {
   entranceId: string;
@@ -30,27 +33,23 @@ export const Screen2Restaurants: React.FC<Screen2RestaurantsProps> = ({
   const entranceNode = buildingMap.nodes.find(n => n.id === entranceId);
   const entranceName = entranceNode?.label || 'Entrada Principal';
 
-  // Monta lista unificada de lojas a partir do buildingMap.units
-  const allStores: Restaurant[] = buildingMap.units.map(u => ({
-    id: u.id,
-    name: u.name,
-    logo: u.logo || '🛍️',
-    bgColor: u.bgColor || u.color || '#1e293b',
-    logoColor: u.logoColor || '#ffffff',
-    location: u.sector || 'Piso 1',
-    floor: buildingMap.floors.find(f => f.id === u.floorId)?.name || 'Piso Térreo',
-    sector: u.sector || 'Geral',
-    distance: u.distance || 180,
-    storeNumber: u.code || 'Loja',
-    pickupInstructions: [
-      u.courierPickup?.notes || 'Retirada no balcão de delivery com código do app',
-      'Identificar-se como entregador',
-      'Em caso de dúvida, fale com a equipe da loja'
-    ],
-    courierInfo: u.courierPickup?.notes || 'Balcão de atendimento',
-    totalRoutes: 95,
-    routeSteps: []
-  }));
+  // Distância real (metros a pé) da entrada até a porta de cada loja, numa única busca no grafo.
+  const { allStores, unreachableCount } = useMemo(() => {
+    const meters = routeDistancesFrom(buildingMap, entranceId, userProfile);
+    const reachable: Restaurant[] = [];
+    let unreachable = 0;
+    for (const u of buildingMap.units) {
+      const door = resolveUnitDoorNode(buildingMap, u);
+      const d = door ? meters.get(door.id) : undefined;
+      if (d === undefined) {
+        unreachable++;
+        continue;
+      }
+      reachable.push(unitToRestaurant(buildingMap, u, Math.round(d)));
+    }
+    reachable.sort((x, y) => x.distance - y.distance);
+    return { allStores: reachable, unreachableCount: unreachable };
+  }, [buildingMap, entranceId, userProfile]);
 
   const categories = [
     { id: 'all', label: 'Todas as Lojas' },
@@ -191,6 +190,12 @@ export const Screen2Restaurants: React.FC<Screen2RestaurantsProps> = ({
           {filtered.length} {filtered.length === 1 ? 'resultado' : 'resultados'}
         </span>
       </div>
+      {unreachableCount > 0 && (
+        <p className="mx-4 mb-1 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+          {unreachableCount} {unreachableCount === 1 ? 'loja não tem' : 'lojas não têm'} rota a partir desta entrada
+          {userProfile === 'customer' ? ' para clientes' : ''}. Troque de entrada ou de perfil para vê-{unreachableCount === 1 ? 'la' : 'las'}.
+        </p>
+      )}
 
       {/* Lista de Lojas */}
       <div className="flex-1 overflow-y-auto divide-y divide-gray-100">

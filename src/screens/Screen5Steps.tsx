@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
 import { ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
 import { StatusBar } from '../components/StatusBar';
-import { Restaurant } from '../data/restaurants';
+import type { Restaurant } from '../types/restaurant';
 import { BuildingMap } from '../types/map';
 import { calculateIndoorRoute } from '../utils/pathfinding';
+import { findUnit, resolveUnitDoorNode } from '../utils/mapRules';
+import type { UserProfile } from '../types/map';
 
 interface Screen5StepsProps {
   restaurant: Restaurant;
   buildingMap: BuildingMap;
   entranceId?: string;
+  userProfile?: UserProfile;
   onBack: () => void;
   onArrived: () => void;
 }
@@ -82,24 +85,19 @@ const StepIcon = ({ iconType }: { iconType: string }) => {
 export const Screen5Steps: React.FC<Screen5StepsProps> = ({
   restaurant,
   buildingMap,
-  entranceId = 'node-ent-feira',
+  entranceId = '',
+  userProfile = 'courier',
   onBack,
   onArrived,
 }) => {
   const [currentStep, setCurrentStep] = useState(0);
 
   // Calcula rota dinâmica
-  const targetNode = buildingMap.nodes.find(n => 
-    n.label?.toLowerCase().includes(restaurant.name.toLowerCase()) ||
-    n.id.toLowerCase().includes(restaurant.id.toLowerCase())
-  ) || buildingMap.nodes.find(n => n.id === 'node-door-outback-bangu') || buildingMap.nodes[0];
-
-  const routeResult = calculateIndoorRoute(
-    buildingMap,
-    entranceId,
-    targetNode.id,
-    'courier'
-  );
+  const unit = findUnit(buildingMap, restaurant.id);
+  const targetNode = unit ? resolveUnitDoorNode(buildingMap, unit) : null;
+  const routeResult = targetNode
+    ? calculateIndoorRoute(buildingMap, entranceId, targetNode.id, userProfile)
+    : null;
 
   // Usa instruções geradas pelo algoritmo Dijkstra se disponível, com fallback para o dataset estático
   const steps = routeResult && routeResult.instructions.length > 0
@@ -110,8 +108,8 @@ export const Screen5Steps: React.FC<Screen5StepsProps> = ({
         title: inst.title,
         description: inst.description,
         icon: inst.iconType,
-        hasPhoto: inst.iconType === 'elevator' || inst.iconType === 'escalator' || idx === 1,
-        photoDescription: inst.photoDescription || (inst.iconType === 'elevator' ? 'Elevador de Serviço 2 – Próx. Entrada B' : 'Corredor do Setor Oeste'),
+        hasPhoto: false, // o mapa ainda não tem fotos de referência: não exibimos foto nem legenda inventada
+        photoDescription: inst.photoDescription,
         connectorType: inst.iconType === 'elevator' ? 'elevator' : inst.iconType === 'escalator' ? 'escalator' : undefined
       }))
     : restaurant.routeSteps;
@@ -131,6 +129,21 @@ export const Screen5Steps: React.FC<Screen5StepsProps> = ({
     if (currentStep > 0) setCurrentStep(prev => prev - 1);
   };
 
+  if (!step) {
+    return (
+      <div className="flex flex-col h-full bg-white">
+        <StatusBar />
+        <div className="flex-1 flex flex-col items-center justify-center text-center px-8 gap-3">
+          <p className="font-bold text-gray-900">Não foi possível montar o passo a passo</p>
+          <p className="text-sm text-gray-500">Não há caminho entre sua entrada e {restaurant.name}.</p>
+          <button onClick={onBack} className="mt-2 px-5 py-2.5 rounded-xl bg-gray-900 text-white text-sm font-bold">
+            Voltar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full bg-gray-50">
       <div className="bg-white">
@@ -142,7 +155,7 @@ export const Screen5Steps: React.FC<Screen5StepsProps> = ({
           <div className="flex-1 text-center">
             <p className="text-xs text-blue-600 font-semibold">Rota até {restaurant.name}</p>
             <p className="text-gray-400 text-xs">
-              {routeResult ? `${routeResult.estimatedMinutes} min • ${routeResult.totalDistanceMeters}m` : `${Math.ceil(restaurant.distance / 80)} min • ${restaurant.distance}m`}
+              {routeResult ? `${routeResult.estimatedMinutes} min • ${routeResult.totalDistanceMeters}m` : ''}
             </p>
           </div>
           <div className="w-8" />

@@ -25,7 +25,10 @@ import {
   AlertTriangle,
   Download
 } from 'lucide-react';
-import { HOURLY_DATA } from '../data/restaurants';
+import { SAMPLE_HOURLY_ROUTES as HOURLY_DATA } from '../data/sampleAnalytics';
+import { QrImage } from './QrImage';
+import { buildPlateUrl } from '../utils/qr';
+import { listEntrances, resolveUnitDoorNode } from '../utils/mapRules';
 import { BuildingMap, StoreUnit, Point, CategoryType } from '../types/map';
 import { calculateIndoorRoute } from '../utils/pathfinding';
 import { InteractiveMapCanvas } from './InteractiveMapCanvas';
@@ -126,9 +129,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [storeLogo, setStoreLogo] = useState('🛍️');
   const [storeColor, setStoreColor] = useState('#2563eb');
 
-  const entrances = buildingMap.nodes.filter(n => n.type === 'entrance' || n.type === 'courier_parking');
+  const entrances = listEntrances(buildingMap);
   const firstEntranceId = entrances[0]?.id || buildingMap.nodes[0]?.id || '';
-  const firstTargetId = buildingMap.nodes.find(n => n.id.includes('door') || n.id.includes('outback'))?.id || buildingMap.nodes[1]?.id || '';
+  const firstTargetId = (buildingMap.units[0] && resolveUnitDoorNode(buildingMap, buildingMap.units[0])?.id) || '';
 
   const previewRoute = calculateIndoorRoute(
     buildingMap,
@@ -629,14 +632,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {entrances.length === 0 && (
+                <p className="text-xs text-red-600 font-semibold">Este shopping não tem nenhuma entrada cadastrada: adicione um ponto do tipo entrada no editor.</p>
+              )}
+              <div className="print-area grid grid-cols-1 md:grid-cols-2 gap-4">
                 {entrances.map((entrance) => (
                   <div
                     key={entrance.id}
                     className="p-5 rounded-2xl border-2 border-gray-200 bg-white hover:border-emerald-500 transition-all flex items-start gap-4 shadow-sm"
                   >
-                    <div className="w-24 h-24 bg-gray-50 border border-gray-200 p-2 rounded-2xl shrink-0 flex items-center justify-center shadow-inner">
-                      <QrCode size={64} className="text-slate-900" />
+                    <div className="w-28 h-28 print:w-72 print:h-72 bg-white border border-gray-200 p-1 rounded-2xl shrink-0 flex items-center justify-center shadow-inner">
+                      <QrImage text={buildPlateUrl(window.location.origin, buildingMap.id, entrance.id)} size={240} className="w-full h-full" />
                     </div>
 
                     <div className="flex-1 min-w-0">
@@ -644,9 +650,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         {entrance.type === 'courier_parking' ? 'Acesso Motos' : 'Entrada'}
                       </span>
                       <h4 className="font-black text-gray-900 text-sm mt-1">{entrance.label || 'Portão'}</h4>
-                      <p className="text-xs text-gray-400 mt-0.5 font-mono">ID: {entrance.id}</p>
+                      <p className="text-xs text-gray-400 mt-0.5 font-mono">Código: {entrance.id}</p>
 
-                      <div className="mt-3 flex gap-2">
+                      <div className="mt-3 flex gap-2 print:hidden">
                         <button
                           onClick={() => window.print()}
                           className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors"
@@ -683,6 +689,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           {/* 6. RELATÓRIOS EXECUTIVOS & BI DE TRÁFEGO (PASSO 3) */}
           {activeSection === 'metrics' && (
             <div className="space-y-6">
+              <div role="note" className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900 font-semibold">
+                Exemplo ilustrativo — os números desta tela ainda não vêm de medições reais. Os indicadores verdadeiros
+                (tempo cancela-ao-balcão, fluxo por corredor) passam a aparecer quando a coleta de rotas for ativada neste shopping.
+              </div>
               {/* Header do Relatório com Exportação */}
               <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>

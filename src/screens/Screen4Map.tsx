@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Navigation, 
   Compass, 
@@ -20,9 +20,10 @@ import {
 } from 'lucide-react';
 import { StatusBar } from '../components/StatusBar';
 import { AppHeader } from '../components/AppHeader';
-import { Restaurant } from '../data/restaurants';
-import { BuildingMap, UserProfile } from '../types/map';
+import type { Restaurant } from '../types/restaurant';
+import type { BuildingMap, UserProfile } from '../types/map';
 import { calculateIndoorRoute } from '../utils/pathfinding';
+import { findUnit, resolveUnitDoorNode } from '../utils/mapRules';
 import { InteractiveMapCanvas } from '../components/InteractiveMapCanvas';
 import { useIndoorNavigation } from '../utils/useIndoorNavigation';
 import { audioNav } from '../utils/audioNavigation';
@@ -56,19 +57,16 @@ export const Screen4Map: React.FC<Screen4MapProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
 
   // Encontra nó destino baseado no restaurante
-  const targetNode = buildingMap.nodes.find(n => 
-    n.label?.toLowerCase().includes(restaurant.name.toLowerCase()) ||
-    n.id.toLowerCase().includes(restaurant.id.toLowerCase())
-  ) || buildingMap.nodes.find(n => n.id === 'node-door-outback-bangu') || buildingMap.nodes[0];
+  const unit = findUnit(buildingMap, restaurant.id);
+  const targetNode = unit ? resolveUnitDoorNode(buildingMap, unit) : null;
 
   const activeFloorId = buildingMap.floors[0]?.id || 'floor-terreo';
 
   // Rota do Dijkstra respeitando perfil
-  const routeResult = calculateIndoorRoute(
-    buildingMap,
-    startNodeId,
-    targetNode.id,
-    userProfile
+  // Memorizada: um objeto novo a cada renderização fazia o hook de navegação reiniciar em loop infinito.
+  const routeResult = useMemo(
+    () => (targetNode ? calculateIndoorRoute(buildingMap, startNodeId, targetNode.id, userProfile) : null),
+    [buildingMap, startNodeId, targetNode, userProfile],
   );
 
   // Motor de Navegação Waze com Sensores e Pedometer
@@ -90,6 +88,7 @@ export const Screen4Map: React.FC<Screen4MapProps> = ({
   // PASSO 1: DISPARO DE VOZ, CHIMES SONOROS E HAPTIC FEEDBACK AUTOMÁTICOS
   // =========================================================================
   useEffect(() => {
+    if (!routeResult) return; // sem rota não há o que falar: nunca narrar uma instrução inventada
     if (nav.hasArrived) {
       haptics.success();
       audioNav.playChime('arrival');
@@ -100,7 +99,7 @@ export const Screen4Map: React.FC<Screen4MapProps> = ({
       const textToSpeak = `${currentInstruction.title}. ${currentInstruction.description}`;
       audioNav.speak(textToSpeak);
     }
-  }, [nav.currentStepIndex, nav.hasArrived, restaurant.name, currentInstruction.title, currentInstruction.description]);
+  }, [routeResult, nav.currentStepIndex, nav.hasArrived, restaurant.name, currentInstruction.title, currentInstruction.description]);
 
   // Ícone de manobra baseado na instrução
   const getTurnIcon = () => {
@@ -168,6 +167,24 @@ export const Screen4Map: React.FC<Screen4MapProps> = ({
     };
   }, [cameraStream]);
 
+  if (!routeResult) {
+    return (
+      <div className="flex flex-col h-full bg-white">
+        <StatusBar />
+        <AppHeader onBack={onBack} mallName={buildingMap.name} />
+        <div className="flex-1 flex flex-col items-center justify-center text-center px-8 gap-3">
+          <p className="font-bold text-gray-900">Não foi possível traçar a rota</p>
+          <p className="text-sm text-gray-500">
+            Não encontramos um caminho da sua entrada até {restaurant.name}. Escolha outra entrada ou fale com a equipe do shopping.
+          </p>
+          <button onClick={onBack} className="mt-2 px-5 py-2.5 rounded-xl bg-gray-900 text-white text-sm font-bold">
+            Voltar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full bg-slate-950 text-slate-100 overflow-hidden relative">
       <div className="bg-white">
@@ -186,7 +203,7 @@ export const Screen4Map: React.FC<Screen4MapProps> = ({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5">
               <span className="text-cyan-400 font-extrabold text-sm tracking-tight">
-                {nav.hasArrived ? 'Você chegou!' : `Em ~${Math.max(10, Math.round(nav.remainingDistanceMeters * 0.4))}m`}
+                {nav.hasArrived ? 'Você chegou!' : `Faltam ${nav.remainingDistanceMeters}m`}
               </span>
               <span className="text-[10px] text-slate-400">| Passo {nav.currentStepIndex + 1} de {routeResult?.instructions.length || 1}</span>
             </div>
@@ -194,7 +211,7 @@ export const Screen4Map: React.FC<Screen4MapProps> = ({
               {nav.hasArrived ? `Ponto de Retirada: ${restaurant.name}` : currentInstruction.title}
             </p>
             <p className="text-[11px] text-slate-300 leading-tight truncate">
-              {nav.hasArrived ? 'Balcão de delivery à sua frente' : currentInstruction.description}
+              {nav.hasArrived ? 'Você chegou ao destino' : currentInstruction.description}
             </p>
           </div>
 
@@ -223,11 +240,11 @@ export const Screen4Map: React.FC<Screen4MapProps> = ({
             ) : nav.isSimulating ? (
               <span className="bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 backdrop-blur">
                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
-                Waze em Movimento ({nav.speedKmh} km/h)
+                Simulação ({nav.speedKmh} km/h)
               </span>
             ) : (
               <span className="bg-slate-900/80 border border-slate-700 text-slate-400 text-[10px] font-medium px-2 py-0.5 rounded-full backdrop-blur">
-                GPS Indoor Pronto
+                Posição estimada pelos passos
               </span>
             )}
           </div>
@@ -262,9 +279,9 @@ export const Screen4Map: React.FC<Screen4MapProps> = ({
               buildingMap={buildingMap}
               activeFloorId={activeFloorId}
               routeResult={routeResult}
-              selectedUnitId={buildingMap.units.find(u => u.name.toLowerCase().includes(restaurant.name.toLowerCase()))?.id || null}
+              selectedUnitId={unit?.id ?? null}
               startNodeId={startNodeId}
-              targetNodeId={targetNode.id}
+              targetNodeId={targetNode?.id ?? ''}
               isEditorMode={false}
               userPosition={nav.currentPosition}
               userHeading={nav.heading}

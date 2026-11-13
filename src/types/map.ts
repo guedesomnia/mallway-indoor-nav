@@ -28,6 +28,7 @@ export interface StoreUnit {
   polygon: Point[];
   color?: string;
   door: Point; // Coordenada da porta de entrada
+  doorNodeId?: string; // Nó do grafo que representa a porta (ligação explícita; sem ela vale o nó mais próximo da porta)
   courierPickup?: CourierPickupInfo;
   operatingHours?: string;
   description?: string;
@@ -91,6 +92,8 @@ export interface FloorLevel {
   height: number;
   backgroundImage?: string;
   backgroundOpacity?: number;
+  metersPerPixel?: number; // Escala real do piso. Sem calibração o mapa não é publicável
+  scaleCalibrated?: boolean;
 }
 
 export interface BuildingMap {
@@ -131,4 +134,14 @@ export interface RouteResult {
   totalDistanceMeters: number;
   estimatedMinutes: number;
   instructions: RouteInstruction[];
+}
+
+/** Arquivo publicado pelo servidor em /p/{mall}/latest.json e consumido pelo PWA. */
+export interface MapPackage {
+  schemaVersion: number;
+  mallId: string;
+  version: number;
+  publishedAt: string;
+  contentHash: string;
+  map: BuildingMap;
 }
