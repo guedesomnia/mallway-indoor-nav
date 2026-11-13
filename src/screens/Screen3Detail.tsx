@@ -1,7 +1,7 @@
 import React from 'react';
 import { MapPin, Clock, CheckCircle, Navigation, Bike, User, Sparkles, AlertCircle, Store } from 'lucide-react';
 import { StatusBar } from '../components/StatusBar';
-import { Restaurant } from '../data/restaurants';
+import type { Restaurant } from '../types/restaurant';
 import { UserProfile } from '../types/map';
 import { haptics } from '../utils/haptics';
 

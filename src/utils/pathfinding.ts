@@ -9,27 +9,66 @@ import {
 
 interface GraphEdge {
   targetNodeId: string;
-  weight: number;
+  weight: number; // custo usado para escolher o caminho (inclui descontos/penalidades)
+  meters: number; // distância física real percorrida (0 em conexões verticais)
   isVertical: boolean;
   connectorName?: string;
   connectorType?: 'elevator' | 'escalator' | 'stairs' | 'ramp';
   targetFloorId: string;
 }
 
-export function calculateIndoorRoute(
+
+interface HeapItem {
+  nodeId: string;
+  dist: number;
+}
+
+class MinHeap {
+  private a: HeapItem[] = [];
+  get length(): number {
+    return this.a.length;
+  }
+  push(item: HeapItem): void {
+    const a = this.a;
+    a.push(item);
+    let i = a.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (a[p].dist <= a[i].dist) break;
+      [a[p], a[i]] = [a[i], a[p]];
+      i = p;
+    }
+  }
+  pop(): HeapItem | undefined {
+    const a = this.a;
+    if (a.length === 0) return undefined;
+    const top = a[0];
+    const last = a.pop()!;
+    if (a.length > 0) {
+      a[0] = last;
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1;
+        const r = l + 1;
+        let m = i;
+        if (l < a.length && a[l].dist < a[m].dist) m = l;
+        if (r < a.length && a[r].dist < a[m].dist) m = r;
+        if (m === i) break;
+        [a[m], a[i]] = [a[i], a[m]];
+        i = m;
+      }
+    }
+    return top;
+  }
+}
+
+function buildGraph(
   map: BuildingMap,
-  startNodeId: string,
-  targetNodeId: string,
-  profile: UserProfile = 'courier',
-  accessibleOnly: boolean = false
-): RouteResult | null {
+  profile: UserProfile,
+  accessibleOnly: boolean
+): { nodeMap: Map<string, WayNode>; adj: Map<string, GraphEdge[]> } {
   const nodeMap = new Map<string, WayNode>();
   map.nodes.forEach(n => nodeMap.set(n.id, n));
-
-  const startNode = nodeMap.get(startNodeId);
-  const targetNode = nodeMap.get(targetNodeId);
-
-  if (!startNode || !targetNode) return null;
 
   // Montar lista de adjacência
   const adj = new Map<string, GraphEdge[]>();
@@ -59,6 +98,7 @@ export function calculateIndoorRoute(
     adj.get(edge.nodeA)?.push({
       targetNodeId: edge.nodeB,
       weight,
+      meters: edge.distance,
       isVertical: false,
       targetFloorId: nodeB.floorId
     });
@@ -66,6 +106,7 @@ export function calculateIndoorRoute(
     adj.get(edge.nodeB)?.push({
       targetNodeId: edge.nodeA,
       weight,
+      meters: edge.distance,
       isVertical: false,
       targetFloorId: nodeA.floorId
     });
@@ -95,6 +136,7 @@ export function calculateIndoorRoute(
           adj.get(connFrom.nodeId)?.push({
             targetNodeId: connTo.nodeId,
             weight: verticalWeight,
+            meters: 0,
             isVertical: true,
             connectorName: vc.name,
             connectorType: vc.type,
@@ -105,6 +147,55 @@ export function calculateIndoorRoute(
     }
   });
 
+  return { nodeMap, adj };
+}
+
+/**
+ * Metros reais a pé do ponto de partida até cada nó alcançável (uma única busca), seguindo o caminho de menor
+ * custo. Usado nas listas de lojas para mostrar distância real em vez de um número fixo cadastrado.
+ */
+export function routeDistancesFrom(
+  map: BuildingMap,
+  startNodeId: string,
+  profile: UserProfile = 'courier',
+  accessibleOnly: boolean = false
+): Map<string, number> {
+  const { nodeMap, adj } = buildGraph(map, profile, accessibleOnly);
+  const meters = new Map<string, number>();
+  if (!nodeMap.has(startNodeId)) return meters;
+  const cost = new Map<string, number>([[startNodeId, 0]]);
+  meters.set(startNodeId, 0);
+  const heap = new MinHeap();
+  heap.push({ nodeId: startNodeId, dist: 0 });
+  while (heap.length > 0) {
+    const { nodeId, dist: d } = heap.pop()!;
+    if (d > (cost.get(nodeId) ?? Infinity)) continue;
+    for (const e of adj.get(nodeId) ?? []) {
+      const nd = d + e.weight;
+      if (nd < (cost.get(e.targetNodeId) ?? Infinity)) {
+        cost.set(e.targetNodeId, nd);
+        meters.set(e.targetNodeId, (meters.get(nodeId) ?? 0) + e.meters);
+        heap.push({ nodeId: e.targetNodeId, dist: nd });
+      }
+    }
+  }
+  return meters;
+}
+
+export function calculateIndoorRoute(
+  map: BuildingMap,
+  startNodeId: string,
+  targetNodeId: string,
+  profile: UserProfile = 'courier',
+  accessibleOnly: boolean = false
+): RouteResult | null {
+  const { nodeMap, adj } = buildGraph(map, profile, accessibleOnly);
+
+  const startNode = nodeMap.get(startNodeId);
+  const targetNode = nodeMap.get(targetNodeId);
+
+  if (!startNode || !targetNode) return null;
+
   // 3. Execução do algoritmo de Dijkstra
   const distances = new Map<string, number>();
   const previous = new Map<string, { prevNodeId: string; edge: GraphEdge }>();
@@ -113,13 +204,11 @@ export function calculateIndoorRoute(
   map.nodes.forEach(n => distances.set(n.id, Infinity));
   distances.set(startNodeId, 0);
 
-  const priorityQueue: { nodeId: string; dist: number }[] = [
-    { nodeId: startNodeId, dist: 0 }
-  ];
+  const priorityQueue = new MinHeap();
+  priorityQueue.push({ nodeId: startNodeId, dist: 0 });
 
   while (priorityQueue.length > 0) {
-    priorityQueue.sort((a, b) => a.dist - b.dist);
-    const { nodeId: currentId, dist: currentDist } = priorityQueue.shift()!;
+    const { nodeId: currentId, dist: currentDist } = priorityQueue.pop()!;
 
     if (visited.has(currentId)) continue;
     visited.add(currentId);
@@ -210,8 +299,8 @@ export function calculateIndoorRoute(
       currentSegmentDistance = 0;
     } else {
       currentPoints.push({ x: nextNode.x, y: nextNode.y });
-      currentSegmentDistance += edge.weight;
-      totalDistanceMeters += edge.weight;
+      currentSegmentDistance += edge.meters;
+      totalDistanceMeters += edge.meters;
 
       if (nextNode.label && nextNode.id !== targetNodeId) {
         instructions.push({
@@ -219,9 +308,9 @@ export function calculateIndoorRoute(
           floorId: currentFloorId,
           floorName: floorNameMap.get(currentFloorId) || '',
           title: `Siga pelo corredor`,
-          description: `Passe por ${nextNode.label} (~${Math.round(edge.weight)}m).`,
+          description: `Passe por ${nextNode.label} (~${Math.round(edge.meters)}m).`,
           iconType: 'walk',
-          estimatedSeconds: Math.round(edge.weight / 1.2)
+          estimatedSeconds: Math.round(edge.meters / 1.2)
         });
       }
     }

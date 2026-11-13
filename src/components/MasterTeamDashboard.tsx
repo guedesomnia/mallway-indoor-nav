@@ -10,7 +10,6 @@ import {
   Clock, 
   Store, 
   Printer, 
-  Trash2, 
   ExternalLink, 
   Image as ImageIcon,
   CheckCircle2,
@@ -18,24 +17,25 @@ import {
   Layers,
   Sparkles
 } from 'lucide-react';
-import { BuildingMap, FloorLevel } from '../types/map';
+import type { BuildingMap, FloorLevel } from '../types/map';
+import { QrImage } from './QrImage';
+import { buildPlateUrl } from '../utils/qr';
+import { listEntrances } from '../utils/mapRules';
 
 interface MasterTeamDashboardProps {
   shoppings: BuildingMap[];
+  liveVersions: Record<string, number | null>;
   onSelectShoppingForAdmin: (shoppingId: string) => void;
   onSelectShoppingForApp: (shoppingId: string) => void;
-  onCreateShopping: (newShopping: BuildingMap) => void;
-  onDeleteShopping: (shoppingId: string) => void;
-  onResetAllShoppings: () => void;
+  onCreateShopping: (newShopping: BuildingMap, floorImage: File | null) => Promise<string | null>;
 }
 
 export const MasterTeamDashboard: React.FC<MasterTeamDashboardProps> = ({
   shoppings,
+  liveVersions,
   onSelectShoppingForAdmin,
   onSelectShoppingForApp,
   onCreateShopping,
-  onDeleteShopping,
-  onResetAllShoppings,
 }) => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [qrModalShopping, setQrModalShopping] = useState<BuildingMap | null>(null);
@@ -46,11 +46,15 @@ export const MasterTeamDashboard: React.FC<MasterTeamDashboardProps> = ({
   const [newState, setNewState] = useState('RJ');
   const [newAddress, setNewAddress] = useState('');
   const [newEntranceName, setNewEntranceName] = useState('Entrada Principal (Portão A)');
-  const [uploadedFloorImage, setUploadedFloorImage] = useState<string | null>(null);
+  const [uploadedFloorImage, setUploadedFloorImage] = useState<string | null>(null); // só pré-visualização
+  const [uploadedFloorFile, setUploadedFloorFile] = useState<File | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setUploadedFloorFile(file);
       const reader = new FileReader();
       reader.onload = (event) => {
         setUploadedFloorImage(event.target?.result as string);
@@ -59,9 +63,9 @@ export const MasterTeamDashboard: React.FC<MasterTeamDashboardProps> = ({
     }
   };
 
-  const handleCreateSubmit = (e: React.FormEvent) => {
+  const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim()) return;
+    if (!newName.trim() || creating) return;
 
     const shoppingId = `shopping-${Date.now()}`;
     const floorId = `floor-${Date.now()}`;
@@ -74,8 +78,9 @@ export const MasterTeamDashboard: React.FC<MasterTeamDashboardProps> = ({
       elevation: 0,
       width: 900,
       height: 600,
-      backgroundImage: uploadedFloorImage || undefined,
       backgroundOpacity: 0.95,
+      metersPerPixel: 0.25,
+      scaleCalibrated: false,
     };
 
     const newMall: BuildingMap = {
@@ -102,11 +107,19 @@ export const MasterTeamDashboard: React.FC<MasterTeamDashboardProps> = ({
       verticalConnectors: [],
     };
 
-    onCreateShopping(newMall);
+    setCreating(true);
+    setCreateError(null);
+    const error = await onCreateShopping(newMall, uploadedFloorFile);
+    setCreating(false);
+    if (error) {
+      setCreateError(error);
+      return;
+    }
     setIsCreateModalOpen(false);
     setNewName('');
     setNewAddress('');
     setUploadedFloorImage(null);
+    setUploadedFloorFile(null);
   };
 
   // Métricas Globais da Plataforma
@@ -128,7 +141,7 @@ export const MasterTeamDashboard: React.FC<MasterTeamDashboardProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="font-black text-lg text-white tracking-tight">WayfindMall</h1>
+                <h1 className="font-black text-lg text-white tracking-tight">MallWay Pro</h1>
                 <span className="text-[10px] font-bold bg-cyan-950 text-cyan-400 border border-cyan-800 px-2 py-0.5 rounded-full uppercase">
                   Master B2B Dashboard
                 </span>
@@ -140,12 +153,6 @@ export const MasterTeamDashboard: React.FC<MasterTeamDashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-3">
-            <button
-              onClick={onResetAllShoppings}
-              className="text-xs text-slate-400 hover:text-slate-200 px-3 py-2 rounded-xl hover:bg-slate-800 transition-colors"
-            >
-              Restaurar Catálogo Base
-            </button>
 
             <button
               onClick={() => setIsCreateModalOpen(true)}
@@ -197,8 +204,10 @@ export const MasterTeamDashboard: React.FC<MasterTeamDashboardProps> = ({
               <TrendingUp size={24} />
             </div>
             <div>
-              <p className="text-2xl font-black text-white">3min40s</p>
-              <p className="text-xs text-slate-400 font-medium">Tempo Médio de Retirada</p>
+              <p className="text-2xl font-black text-white">
+                {shoppings.filter((s) => liveVersions[s.id]).length} <span className="text-sm text-slate-400 font-semibold">de {shoppings.length}</span>
+              </p>
+              <p className="text-xs text-slate-400 font-medium">Shoppings publicados (no ar)</p>
             </div>
           </div>
         </div>
@@ -208,7 +217,7 @@ export const MasterTeamDashboard: React.FC<MasterTeamDashboardProps> = ({
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-lg font-black text-white tracking-tight flex items-center gap-2">
-                <span>Complexos Comerciais Ativos</span>
+                <span>Shoppings</span>
                 <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-mono">
                   {shoppings.length}
                 </span>
@@ -221,9 +230,8 @@ export const MasterTeamDashboard: React.FC<MasterTeamDashboardProps> = ({
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {shoppings.map((shopping) => {
-              const entranceCount = shopping.nodes.filter(
-                n => n.type === 'entrance' || n.type === 'courier_parking'
-              ).length;
+              const entranceCount = listEntrances(shopping).length;
+              const liveVersion = liveVersions[shopping.id] ?? null;
               const hasCustomFloorplan = !!shopping.floors[0]?.backgroundImage;
 
               return (
@@ -244,13 +252,19 @@ export const MasterTeamDashboard: React.FC<MasterTeamDashboardProps> = ({
                           </h3>
                           <div className="flex items-center gap-1 text-slate-400 text-xs mt-0.5">
                             <MapPin size={12} className="text-emerald-500" />
-                            <span>{shopping.city || 'Rio de Janeiro'}, {shopping.state || 'RJ'}</span>
+                            <span>{[shopping.city, shopping.state].filter(Boolean).join(', ') || shopping.address || 'Endereço não informado'}</span>
                           </div>
                         </div>
                       </div>
 
-                      <span className="text-[10px] font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-800/80 px-2 py-0.5 rounded-full">
-                        Ativo
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                          liveVersion
+                            ? 'bg-emerald-950/80 text-emerald-400 border-emerald-800/80'
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}
+                      >
+                        {liveVersion ? `No ar • v${liveVersion}` : 'Rascunho'}
                       </span>
                     </div>
 
@@ -319,19 +333,6 @@ export const MasterTeamDashboard: React.FC<MasterTeamDashboardProps> = ({
                         <QrCode size={15} />
                       </button>
 
-                      {shoppings.length > 1 && (
-                        <button
-                          onClick={() => {
-                            if (confirm(`Deseja remover o ${shopping.name}?`)) {
-                              onDeleteShopping(shopping.id);
-                            }
-                          }}
-                          className="p-2 rounded-xl bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-800/40 transition-colors"
-                          title="Remover Shopping"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -449,11 +450,17 @@ export const MasterTeamDashboard: React.FC<MasterTeamDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition-all shadow-lg shadow-emerald-600/25"
+                  disabled={creating}
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold transition-all shadow-lg shadow-emerald-600/25"
                 >
-                  Criar Shopping
+                  {creating ? 'Criando…' : 'Criar Shopping'}
                 </button>
               </div>
+              {createError && (
+                <p role="alert" className="text-xs text-red-300 bg-red-950/50 border border-red-800/60 rounded-xl px-3 py-2">
+                  {createError}
+                </p>
+              )}
             </form>
           </div>
         </div>
@@ -476,23 +483,22 @@ export const MasterTeamDashboard: React.FC<MasterTeamDashboardProps> = ({
               </button>
             </div>
 
-            <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
-              {qrModalShopping.nodes
-                .filter(n => n.type === 'entrance' || n.type === 'courier_parking')
+            <div className="print-area space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+              {listEntrances(qrModalShopping)
                 .map((entrance) => (
                   <div
                     key={entrance.id}
                     className="bg-slate-950 border border-slate-800 p-4 rounded-2xl flex items-center justify-between gap-4"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-16 h-16 bg-white p-2 rounded-xl shrink-0 flex items-center justify-center shadow-md">
-                        <QrCode size={48} className="text-slate-900" />
+                      <div className="w-28 h-28 print:w-72 print:h-72 bg-white p-1 rounded-xl shrink-0 flex items-center justify-center shadow-md">
+                        <QrImage text={buildPlateUrl(window.location.origin, qrModalShopping.id, entrance.id)} size={240} className="w-full h-full" />
                       </div>
                       <div>
                         <h4 className="font-bold text-white text-sm">{entrance.label || 'Entrada'}</h4>
-                        <p className="text-xs text-slate-400">ID: {entrance.id}</p>
+                        <p className="text-xs text-slate-400">Código: {entrance.id}</p>
                         <span className="text-[10px] text-emerald-400 font-semibold mt-1 inline-block">
-                          ✓ Pronto para impressão e leitura com câmera
+                          Aponte a câmera do celular para abrir o mapa a partir desta entrada
                         </span>
                       </div>
                     </div>

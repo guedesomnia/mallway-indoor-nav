@@ -2,7 +2,7 @@ import React from 'react';
 import { CheckCircle, Bike, DoorOpen, Truck, ChevronRight } from 'lucide-react';
 import { StatusBar } from '../components/StatusBar';
 import { AppHeader } from '../components/AppHeader';
-import { Restaurant } from '../data/restaurants';
+import type { Restaurant } from '../types/restaurant';
 import { haptics } from '../utils/haptics';
 
 interface Screen6ArrivedProps {

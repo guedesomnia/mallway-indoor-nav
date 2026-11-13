@@ -137,14 +137,13 @@ export const InteractiveMapCanvas: React.FC<InteractiveMapCanvasProps> = ({
   // =========================================================================
   useEffect(() => {
     if (userPosition && autoFollow && containerRef.current && !isDragging && !wasPannedByUserRef.current) {
-      const containerW = containerRef.current.clientWidth || 360;
-      const containerH = containerRef.current.clientHeight || 500;
       const floorW = currentFloor.width || 800;
       const floorH = currentFloor.height || 600;
 
-      // Centraliza a posição do usuário na tela
-      const targetPanX = (containerW / 2) - (floorW / 2) - ((userPosition.x - floorW / 2) * scale);
-      const targetPanY = (containerH / 2) - (floorH / 2) - ((userPosition.y - floorH / 2) * scale);
+      // O SVG fica centralizado no contêiner e escala a partir do centro (pan 0,0 = planta centralizada).
+      // Para trazer o usuário ao centro da tela, desloca-se o oposto da distância dele ao centro da planta.
+      const targetPanX = -((userPosition.x - floorW / 2) * scale);
+      const targetPanY = -((userPosition.y - floorH / 2) * scale);
       
       setPan({ x: Math.round(targetPanX), y: Math.round(targetPanY) });
     }

@@ -1,99 +1,131 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { 
-  QrCode, 
-  Bike, 
-  MapPin, 
-  Camera, 
-  X, 
-  Flashlight, 
-  CheckCircle2, 
-  Sparkles,
-  ArrowRight
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  QrCode,
+  Bike,
+  Camera,
+  X,
+  CheckCircle2,
+  Keyboard
 } from 'lucide-react';
 import { StatusBar } from '../components/StatusBar';
 import { AppHeader } from '../components/AppHeader';
-import { ENTRANCES } from '../data/restaurants';
-import { BuildingMap } from '../types/map';
+import type { BuildingMap } from '../types/map';
+import { listEntrances } from '../utils/mapRules';
+import { parseQrPayload } from '../utils/qr';
 import { audioNav } from '../utils/audioNavigation';
 import { haptics } from '../utils/haptics';
 
 interface Screen1QRProps {
   onScanned: (entranceId: string) => void;
+  onOtherMall?: (url: string) => void;
   selectedEntrance: string;
-  buildingMap?: BuildingMap;
+  buildingMap: BuildingMap;
+  notice?: string | null;
 }
 
-export const Screen1QR: React.FC<Screen1QRProps> = ({ 
-  onScanned, 
+// jsQR (~130 KB) só é baixado quando o aparelho não tem leitor de QR nativo (iPhone/Safari).
+let jsQRLoader: Promise<typeof import('jsqr').default> | null = null;
+const loadJsQR = () => (jsQRLoader ??= import('jsqr').then((m) => m.default));
+
+type DetectorLike = { detect: (v: HTMLVideoElement) => Promise<Array<{ rawValue: string }>> };
+const SCAN_TIMEOUT_MS = 90_000; // câmera ligada à toa gasta a bateria do entregador
+
+export const Screen1QR: React.FC<Screen1QRProps> = ({
+  onScanned,
+  onOtherMall,
   selectedEntrance,
-  buildingMap 
+  buildingMap,
+  notice
 }) => {
-  const mallName = buildingMap?.name || 'Bangu Shopping';
-  const logoBadge = buildingMap?.logoBadge || (mallName.includes('Barra') ? 'BB' : mallName.includes('Norte') ? 'NS' : 'BS');
+  const mallName = buildingMap.name;
+  const logoBadge = buildingMap.logoBadge || mallName.substring(0, 2).toUpperCase();
 
   // Modo: Placa Ilustrada ('board') vs Scanner de Câmera Real ('camera')
   const [scannerMode, setScannerMode] = useState<'board' | 'camera'>('board');
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [hasScannedSuccess, setHasScannedSuccess] = useState<boolean>(false);
   const [scannedLabel, setScannedLabel] = useState<string>('');
-  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(notice ?? null);
+  const [scanMessage, setScanMessage] = useState<string | null>(null);
+  const [manualCode, setManualCode] = useState('');
 
   const videoRef = useRef<HTMLVideoElement>(null);
-  const scanIntervalRef = useRef<number | null>(null);
+  const lockedRef = useRef(false); // depois de um código aceito, ignora leituras repetidas do mesmo quadro
+  const lastRejectedRef = useRef<{ raw: string; at: number } | null>(null);
 
-  // Entradas dinâmicas a partir do mapa ou fallback para ENTRANCES
-  const dynamicEntrances = buildingMap 
-    ? buildingMap.nodes
-        .filter(n => n.type === 'entrance')
-        .map(n => ({
-          id: n.id,
-          name: n.label || 'Portão de Acesso',
-          label: `Entrada Oficial • ${buildingMap.floors.find(f => f.id === n.floorId)?.shortName || 'Térreo'}`
-        }))
-    : [];
+  // Só entradas reais do mapa: nunca uma lista de outro shopping como "plano B".
+  const entranceList = listEntrances(buildingMap).map(n => ({
+    id: n.id,
+    name: n.label || 'Portão de Acesso',
+    label: `${n.type === 'courier_parking' ? 'Ponto de entregadores' : 'Entrada oficial'} • ${buildingMap.floors.find(f => f.id === n.floorId)?.shortName || ''}`.trim()
+  }));
 
-  const entranceList = dynamicEntrances.length > 0 ? dynamicEntrances : ENTRANCES;
-
-  // =========================================================================
-  // PASSO 2: ATIVAÇÃO DA CÂMERA DO SMARTPHONE PARA LEITURA DE QR CODE REAL
-  // =========================================================================
-  const startCameraScanner = async () => {
-    setCameraError(null);
-    try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { 
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          }
-        });
-        setCameraStream(stream);
-        setScannerMode('camera');
-        audioNav.playChime('ping');
-      } else {
-        setCameraError('Câmera não suportada neste dispositivo.');
-        setScannerMode('camera');
-      }
-    } catch (err: unknown) {
-      console.warn('Erro ao solicitar acesso à câmera:', err);
-      setCameraError('Permissão da câmera necessária para escanear a placa física.');
-      setScannerMode('camera');
-    }
-  };
-
-  const stopCameraScanner = () => {
-    if (cameraStream) {
-      cameraStream.getTracks().forEach(track => track.stop());
-      setCameraStream(null);
-    }
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current);
-      scanIntervalRef.current = null;
-    }
+  const stopCameraScanner = useCallback(() => {
+    setCameraStream(prev => {
+      prev?.getTracks().forEach(track => track.stop());
+      return null;
+    });
+    lockedRef.current = false;
     setScannerMode('board');
     setHasScannedSuccess(false);
+    setScanMessage(null);
+  }, []);
+
+  const startCameraScanner = async () => {
+    setCameraError(null);
+    setScanMessage(null);
+    lockedRef.current = false;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('Este navegador não permite usar a câmera. Escolha sua entrada na lista abaixo.');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+      });
+      setCameraStream(stream);
+      setScannerMode('camera');
+      audioNav.playChime('ping');
+    } catch (err: unknown) {
+      console.warn('Erro ao solicitar acesso à câmera:', err);
+      // Sem câmera não há beco sem saída: volta para a lista de entradas com a explicação.
+      setCameraError('Não foi possível usar a câmera (permissão negada?). Escolha sua entrada na lista abaixo ou digite o código da placa.');
+      setScannerMode('board');
+    }
   };
+
+  const acceptCode = useCallback((raw: string): boolean => {
+    const result = parseQrPayload(raw, buildingMap, window.location.origin);
+    if (result.kind === 'invalid') {
+      const last = lastRejectedRef.current;
+      if (!last || last.raw !== raw || Date.now() - last.at > 4000) {
+        lastRejectedRef.current = { raw, at: Date.now() };
+        setScanMessage(result.reason);
+        haptics.light();
+      }
+      return false;
+    }
+    if (lockedRef.current) return true;
+    lockedRef.current = true;
+
+    if (result.kind === 'other-mall') {
+      stopCameraScanner();
+      onOtherMall?.(result.url);
+      return true;
+    }
+
+    setScanMessage(null);
+    setHasScannedSuccess(true);
+    setScannedLabel(result.entranceName);
+    haptics.success();
+    audioNav.playChime('arrival');
+    audioNav.speak(`Placa reconhecida. Você está em ${result.entranceName}. Carregando lojas.`);
+    window.setTimeout(() => {
+      stopCameraScanner();
+      onScanned(result.entranceId);
+    }, 900);
+    return true;
+  }, [buildingMap, onOtherMall, onScanned, stopCameraScanner]);
 
   // Conecta o feed de vídeo
   useEffect(() => {
@@ -102,70 +134,83 @@ export const Screen1QR: React.FC<Screen1QRProps> = ({
     }
   }, [scannerMode, cameraStream]);
 
-  // Detector de Código de Barras / QR Code Nativo
+  // Leitura de QR: BarcodeDetector nativo quando existe; jsQR (canvas) no iPhone/Safari e onde o nativo falha.
   useEffect(() => {
-    if (scannerMode !== 'camera' || !videoRef.current || !cameraStream) return;
+    if (scannerMode !== 'camera' || !cameraStream) return;
+    let cancelled = false;
+    let lastRun = 0;
+    let raf = 0;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-    // Se o navegador possuir a BarcodeDetector API nativa
-    const BarcodeDetectorClass = (window as unknown as { BarcodeDetector?: new (options: { formats: string[] }) => { detect: (video: HTMLVideoElement) => Promise<Array<{ rawValue: string }>> } }).BarcodeDetector;
-
-    if (BarcodeDetectorClass) {
-      try {
-        const detector = new BarcodeDetectorClass({ formats: ['qr_code'] });
-
-        scanIntervalRef.current = window.setInterval(async () => {
-          if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
-            try {
-              const barcodes = await detector.detect(videoRef.current);
-              if (barcodes.length > 0) {
-                const code = barcodes[0].rawValue;
-                handleCodeDetected(code);
-              }
-            } catch {
-              // ignore frame read error
-            }
-          }
-        }, 300);
-      } catch (e) {
-        console.warn('BarcodeDetector error:', e);
-      }
+    let detector: DetectorLike | null = null;
+    try {
+      const Native = (window as unknown as { BarcodeDetector?: new (o: { formats: string[] }) => DetectorLike }).BarcodeDetector;
+      if (Native) detector = new Native({ formats: ['qr_code'] });
+    } catch {
+      detector = null;
     }
 
-    return () => {
-      if (scanIntervalRef.current) {
-        clearInterval(scanIntervalRef.current);
+    const decode = async (video: HTMLVideoElement): Promise<string | null> => {
+      if (detector) {
+        try {
+          const found = await detector.detect(video);
+          if (found.length) return found[0].rawValue;
+          return null;
+        } catch {
+          detector = null; // detector quebrado neste aparelho: segue só com jsQR
+        }
       }
+      if (!ctx || !video.videoWidth) return null;
+      const jsQR = await loadJsQR();
+      const w = 480;
+      const h = Math.round((video.videoHeight * w) / video.videoWidth);
+      canvas.width = w;
+      canvas.height = h;
+      ctx.drawImage(video, 0, 0, w, h);
+      const img = ctx.getImageData(0, 0, w, h);
+      return jsQR(img.data, w, h, { inversionAttempts: 'dontInvert' })?.data ?? null;
     };
-  }, [scannerMode, cameraStream]);
 
-  // Trata detecção do código
-  const handleCodeDetected = (rawValue: string) => {
-    // Tenta encontrar se o texto do QR bate com alguma entrada
-    const matched = entranceList.find(e => 
-      rawValue.toLowerCase().includes(e.id.toLowerCase()) || 
-      rawValue.toLowerCase().includes(e.name.toLowerCase())
-    ) || entranceList[0];
+    const tick = async (now: number) => {
+      if (cancelled || lockedRef.current) return;
+      const video = videoRef.current;
+      if (video && video.readyState >= 2 && now - lastRun > 250) {
+        lastRun = now;
+        const raw = await decode(video).catch(() => null);
+        if (raw && !cancelled) acceptCode(raw);
+      }
+      if (!cancelled && !lockedRef.current) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+  }, [scannerMode, cameraStream, acceptCode]);
 
-    setHasScannedSuccess(true);
-    setScannedLabel(matched.name);
-    haptics.success();
-    audioNav.playChime('arrival');
-    audioNav.speak(`QR Code reconhecido! Você está na ${matched.name}. Carregando mapa.`);
-
-    setTimeout(() => {
+  // Desliga a câmera sozinha se ninguém ler nada (bateria).
+  useEffect(() => {
+    if (scannerMode !== 'camera') return;
+    const t = window.setTimeout(() => {
       stopCameraScanner();
-      onScanned(matched.id);
-    }, 1200);
-  };
+      setCameraError('Câmera desligada para poupar bateria. Toque para abrir de novo ou escolha a entrada na lista.');
+    }, SCAN_TIMEOUT_MS);
+    return () => window.clearTimeout(t);
+  }, [scannerMode, stopCameraScanner]);
 
   // Limpa streams no unmount
   useEffect(() => {
     return () => {
-      if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop());
-      }
+      cameraStream?.getTracks().forEach(track => track.stop());
     };
   }, [cameraStream]);
+
+  const submitManual = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualCode.trim()) return;
+    if (acceptCode(manualCode)) setManualCode('');
+  };
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -242,13 +287,21 @@ export const Screen1QR: React.FC<Screen1QRProps> = ({
               <p className="text-white text-xs font-semibold">
                 Centralize o QR Code da cancela ou pilar na moldura
               </p>
-              {/* Botão de teste rápido de reconhecimento para desktop */}
-              <button
-                onClick={() => handleCodeDetected(entranceList[0].id)}
-                className="mt-2 text-[11px] text-emerald-400 hover:text-emerald-300 font-bold underline cursor-pointer"
-              >
-                Simular leitura do Portão Principal
-              </button>
+              {scanMessage && (
+                <p role="alert" className="mt-1.5 text-[11px] text-amber-300 font-semibold">{scanMessage}</p>
+              )}
+              <form onSubmit={submitManual} className="mt-2 flex items-center gap-1.5">
+                <Keyboard size={14} className="text-slate-300 shrink-0" />
+                <input
+                  value={manualCode}
+                  onChange={e => setManualCode(e.target.value)}
+                  placeholder="Digite o código da placa"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  className="flex-1 min-w-0 bg-white/10 text-white placeholder-slate-400 text-[11px] rounded-lg px-2 py-1.5 outline-none focus:ring-1 focus:ring-emerald-400"
+                />
+                <button type="submit" className="text-[11px] font-bold text-emerald-300 px-1.5">OK</button>
+              </form>
             </div>
           </div>
         </div>
@@ -322,6 +375,12 @@ export const Screen1QR: React.FC<Screen1QRProps> = ({
               </div>
             </div>
 
+            {cameraError && (
+              <p role="alert" className="w-full mb-2.5 text-[11px] leading-snug text-amber-200 bg-amber-500/15 border border-amber-400/40 rounded-xl px-3 py-2">
+                {cameraError}
+              </p>
+            )}
+
             {/* BOTÃO PRINCIPAL: ABRIR CÂMERA REAL DO CELULAR */}
             <button
               onClick={startCameraScanner}
@@ -339,12 +398,15 @@ export const Screen1QR: React.FC<Screen1QRProps> = ({
         </div>
       )}
 
-      {/* Seletor Rápido de Entrada Manual / Simulação */}
+      {/* Seletor Rápido de Entrada Manual */}
       {scannerMode === 'board' && (
         <div className="bg-gray-50 border-t border-gray-200 p-3">
           <p className="text-[10px] font-bold text-gray-500 mb-1.5 uppercase tracking-wider">
             Ou escolha o portão onde você está agora:
           </p>
+          {entranceList.length === 0 && (
+            <p className="text-xs text-red-600 font-semibold">Este shopping ainda não tem entradas cadastradas.</p>
+          )}
           <div className="grid grid-cols-1 gap-1.5 max-h-36 overflow-y-auto pr-1">
             {entranceList.map(e => (
               <button

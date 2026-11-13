@@ -281,3 +281,12 @@ body {
   transform: scale(1.01);
   box-shadow: 0 8px 20px rgba(37, 99, 235, 0.35);
 }
+
+/* Impressão de placas de QR Code: imprime só a área marcada, em preto sobre branco */
+@media print {
+  body * { visibility: hidden; }
+  .print-area, .print-area * { visibility: visible; }
+  .print-area { position: absolute; left: 0; top: 0; width: 100%; max-height: none !important; overflow: visible !important; }
+  .print-area * { color: #000 !important; background: #fff !important; box-shadow: none !important; }
+  .print-area > * { break-inside: avoid; page-break-inside: avoid; }
+}
