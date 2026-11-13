@@ -1,150 +1,122 @@
-# MallWay Pro — Sistema Comercial de Wayfinding Indoor & Gestão Logística para Shopping Centers
+# MallWay Pro — navegação indoor assistida por QR para shoppings
 
-> **A plataforma definitiva de navegação indoor em tempo real (estilo Waze) para motoboys de delivery e visitantes em shopping centers.**
+Aplicativo web (PWA) que leva entregadores e visitantes da entrada de um shopping até a loja, sem instalar nada: o
+QR Code da placa abre o app já posicionado, e a rota é calculada no próprio celular.
 
-[![React](https://img.shields.io/badge/React-19.2-61DAFB?logo=react&logoColor=black)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Vite](https://img.shields.io/badge/Vite-8.3-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-38B2AC?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
-[![PWA Ready](https://img.shields.io/badge/PWA-iOS_%26_Android-FF6B6B?logo=pwa&logoColor=white)](https://web.dev/progressive-web-apps/)
+> **O que ele é e o que não é.** A posição do usuário é uma **estimativa**: ponto de partida confirmado pelo QR da
+> placa + contagem de passos pelo acelerômetro, sempre ao longo da rota calculada. Não é GPS indoor, não usa beacons
+> e não detecta desvio de rota. O modo câmera é um overlay simples sobre a imagem do celular, não realidade
+> aumentada com rastreamento. Rotas e tempos só são confiáveis depois que a **escala da planta foi calibrada**.
 
----
+Produto independente (co-irmão da Omnia): operação, venda e clientes próprios. Só a infraestrutura do servidor é
+compartilhada, por economia.
 
-## 🏬 Visão Geral do Produto
+## Como funciona
 
-O **MallWay Pro** resolve um dos maiores gargalos operacionais dos centros de compras da América Latina: **o tempo perdido de entregadores (iFood, Rappi, Zé Delivery) e visitantes tentando localizar lojas, praças de alimentação e cancelas de retirada**.
+```
+ Editor (equipe)            Servidor (FastAPI + Postgres)              App do entregador (PWA)
+ ───────────────            ─────────────────────────────              ───────────────────────
+ edita o rascunho  ──PUT──▶ rascunho com controle de revisão
+ valida e publica  ─────────▶ validador (simula todas as rotas)
+                             grava versão imutável vN
+                             atualiza latest.json  ──── /p/{shopping}/latest.json ────▶ baixa o mapa
+                                                                                        guarda cópia offline
+                                                                                        calcula a rota no aparelho
+```
 
-No caso dos shoppings — como o **Bangu Shopping**, **Barra Shopping** e **NorteShopping** no Rio de Janeiro —, um motoboy gasta tipicamente de **8 a 15 minutos** desde o estacionamento até o balcão do restaurante. Com o **MallWay Pro**, esse tempo é reduzido para **menos de 4 minutos**, via navegação curva a curva sem necessidade de instalar apps pesados nas lojas de aplicativos.
+- **Rascunho x publicado.** A equipe edita um rascunho no servidor. O entregador só enxerga o que foi **publicado**
+  (versão numerada, imutável). Publicou errado? Rollback de um clique no painel de publicação.
+- **Offline.** O mapa baixado fica no aparelho (por shopping). Sem sinal no corredor, o app usa a última cópia e avisa.
+- **Placas.** Cada entrada tem um QR com `https://<site>/?mall=<shopping>&entrance=<entrada>`. O app só aceita QR do
+  próprio site e nunca "adivinha" a entrada: código desconhecido é recusado.
 
----
+## Estrutura
 
-## ✨ Funcionalidades Principais
+```
+src/            PWA React 19 + TypeScript + Tailwind v4
+  api/          cliente HTTP, sessão (login/refresh) e carregador do mapa publicado (cache offline)
+  state/        useAdminCatalog: rascunhos, autosave e detecção de conflito
+  screens/      telas do entregador (QR → lojas → detalhe → mapa → passo a passo → chegada)
+  components/   editor (AdminPanel, MapStudioEditor), painel de publicação, console da rede
+  utils/        rotas (Dijkstra), regras de mapa, QR, calibração de escala
+server/         API FastAPI
+  app/          auth, rascunhos, validador, publicação, upload de planta
+  scripts/      seed (importa os mapas do protótipo como rascunho) e create_admin
+  tests/        71 testes (inclui fuzz contra entrada hostil)
+test/           30 testes do frontend (QR, calibração, rotas, cache offline)
+deploy/         Nginx, systemd, backup das plantas, script de deploy
+```
 
-### 1. 📱 App do Motoboy & Cliente (PWA Mobile First)
-- **Leitor Real de QR Code via Câmera:** Escaneie placas nas entradas e cancelas (ex: `MOTO-ENTRADA-1`, `PRAÇA-ALIMENTACAO`) diretamente pelo navegador com streaming de alta precisão via `BarcodeDetector API`.
-- **Navegação Curva a Curva Indoor Estilo Waze:**
-  - Traçado dinâmico em SVG com algoritmo de caminho mínimo sobre a planta real do shopping.
-  - Indicador pulsante do usuário com odômetro de passos e cálculo de tempo estimado de chegada (ETA).
-  - Panning e zoom interativos com suporte a gestos de toque em smartphones.
-- **Orientação por Voz e Efeitos Sonoros:**
-  - Instruções sonoras nativas faladas em português brasileiro (`pt-BR`) via Web Speech API.
-  - Alertas sonoros polifônicos (chimes) sintetizados em tempo real via Web Audio API para início de rota, curvas e chegada vitoriosa.
-- **Modo Câmera Realidade Aumentada (AR):**
-  - Projeção de setas holográficas 3D em tempo real sobre a imagem capturada da câmera do smartphone, indicando exatamente onde virar no corredor.
-- **Simulador de Caminhada em Tempo Real:** Permite testar o progresso autônomo do entregador andando pelos corredores do shopping.
+## Rodando localmente
 
-### 2. 🛡️ Painel Administrativo de Cada Shopping
-- **Gestão de Lojas e Pontos de Interesse (POIs):** Adicione, edite e posicione lojas com nomes, categorias (Alimentação, Moda, Eletrônicos), números de loja e coordenadas (X, Y).
-- **Editor Visual de Nós & Grafo de Corredores:** Configure pontos de passagem, conexões transitáveis e obstáculos na planta baixa.
-- **Mapa de Calor Térmico (Heatmap):** Visualização em tempo real das áreas e corredores de maior tráfego para prevenção de gargalos operacionais.
-- **BI Executivo & Auditoria de SLA:**
-  - Média de tempo Cancela-ao-Balcão (meta < 5 min).
-  - Taxa de retenção e volume de entregadores simultâneos.
-  - Exportação direta de relatórios para PDF (`window.print()`).
-
-### 3. 🌐 Dashboard Master Multi-Shopping
-- Gestão centralizada de redes de shopping centers.
-- Ativação/desativação de unidades (Bangu Shopping, Barra Shopping, NorteShopping).
-- Monitoramento do status dos grafos, número de lojas ativas e taxa de conclusão de rotas em tempo real.
-
----
-
-## 📱 Suporte Nativo Mobile (iPhone & Android)
-
-O sistema foi rigorosamente otimizado para navegadores mobile:
-- **iPhone (iOS Safari):**
-  - Suporte completo a `viewport-fit=cover` e Safe Area Insets (`env(safe-area-inset-top)` e `env(safe-area-inset-bottom)`).
-  - Modo `apple-mobile-web-app-capable` para execução sem barras do Safari ao ser adicionado à Tela de Início.
-  - Desativação de gestos conflitantes de zoom duplo e elástico do Safari.
-- **Android (Google Chrome):**
-  - Manifesto PWA configurado com `display: standalone` e tema escuro (`#020617`).
-  - Adaptação perfeita ao punch-hole da câmera e à barra de gestos do Android.
-- **Desktop Simulator com Hot-Switch:**
-  - Alternância imediata entre mockup de **iPhone 16 Pro** (com Dynamic Island ativa), **Galaxy S24** (com punch-hole) e **Modo Panorâmico**.
-  - Modal com **QR Code em tempo real** apontando para o IP da rede local para testes simultâneos no celular físico.
-
----
-
-## 🛠️ Stack Tecnológica
-
-| Camada | Tecnologia |
-|---|---|
-| **Frontend Core** | React 19, TypeScript 6, Vite 8 |
-| **Estilização** | Tailwind CSS v4, Lucide React (ícones vetoriais) |
-| **Gráficos & BI** | Recharts (gráficos de barras e dispersão operacional) |
-| **Áudio & Voz** | Web Speech API (`SpeechSynthesis`), Web Audio API (`AudioContext`) |
-| **Visão Computacional** | WebRTC MediaStream (`getUserMedia`), BarcodeDetector API |
-| **Renderização Cartográfica** | SVG Vetorial Responsivo com matrizes de transformação (Pan/Zoom) |
-
----
-
-## 🚀 Como Executar Localmente
-
-### Pré-requisitos
-- [Node.js](https://nodejs.org/) (versão 18 ou superior)
-- `npm` ou `pnpm`
-
-### Instalação
+Pré-requisitos: Node 20+ e Python 3.11+.
 
 ```bash
-# Clone o repositório
-git clone https://github.com/guedesomnia/mallway-indoor-nav.git
+# 1) Backend (porta 8000, SQLite local, nada de produção)
+cd server
+python -m venv .venv && ./.venv/Scripts/pip install -r requirements-dev.txt    # Linux/Mac: .venv/bin/pip
+./.venv/Scripts/python -m scripts.seed          # importa Bangu/Barra/Norte como rascunhos e mostra o que falta corrigir
+./.venv/Scripts/python -m scripts.create_admin voce@exemplo.com --role master   # pede a senha no terminal
+./.venv/Scripts/python dev.py
 
-# Acesse o diretório
-cd mallway-indoor-nav
-
-# Instale as dependências
-npm install
-
-# Inicie o servidor de desenvolvimento
-npm run dev
+# 2) Frontend (porta 5174; o Vite repassa /api, /auth e /p para o backend)
+cd .. && npm install && npm run dev
 ```
 
-O terminal exibirá:
-```
-  VITE v8.3.0  ready in 250 ms
+Abra `http://localhost:5174/?mode=master` e entre. Para ver o app do entregador, publique um shopping e abra
+`http://localhost:5174/?mall=<id-do-shopping>`.
 
-  ➜  Local:   http://localhost:5174/
-  ➜  Network: http://192.168.0.X:5174/
-```
+Testes: `npm test` (frontend), `npm run test:server` (backend), `npm run check:paths` (paridade do motor de rotas com a
+versão original do protótipo).
 
-Abra o endereço Network no navegador do seu smartphone conectado ao mesmo Wi-Fi para testar a câmera, voz e Realidade Aumentada.
+## Regras de publicação
+
+O servidor simula **toda entrada × toda loja × cada perfil** (entregador, cliente, cliente acessível) antes de publicar.
+Bloqueiam a publicação:
+
+| Regra | Por quê |
+|---|---|
+| Piso sem **escala calibrada** | sem ela toda distância e tempo estimado ficam errados |
+| Loja sem nó de porta ligado ao corredor | a rota levaria a outro lugar |
+| Loja inalcançável por entregador | o app não conseguiria guiar até lá |
+| Entrada sem nenhuma conexão, ou mapa sem entradas | não há ponto de partida |
+| IDs duplicados, referências quebradas, aresta entre pisos, distância ≤ 0 | grafo inconsistente |
+| Planta que não é caminho local (data URL, link externo) | pacote gigante / conteúdo de terceiros |
+| Pacote acima de 2 MB | ruim para rede de shopping |
+
+Avisos (não bloqueiam): ponto fora da tela, ponto órfão, distância divergente da geometria, loja inalcançável para
+cliente/cadeirante, rota de entregador acima de 1200 m (sinal de escala errada).
+
+## Segurança e operação
+
+- Senhas com scrypt; sessões JWT com revogação imediata (usuário desativado ou senha trocada perde acesso na hora);
+  limite de tentativas de login por IP e por e-mail; mensagem idêntica para e-mail inexistente e senha errada.
+- Quem administra um shopping só enxerga esse shopping (os outros respondem 404, não 403).
+- Dois admins no mesmo mapa: o segundo a salvar recebe aviso de conflito e **nada é sobrescrito** (revisão por
+  compare-and-swap no banco).
+- Plantas: validadas, convertidas para WebP, com nome pelo hash do conteúdo (nunca o nome enviado).
+- Erros do app chegam em `POST /api/beacon` e viram linha de log (journald), sem dado pessoal.
+- `GET /api/health` (banco responde + pasta pública gravável) — adicione ao `omnia-health`.
+- Esquema do banco hoje é criado por `create_all`. **Antes de alterar qualquer coluna existente (ex.: tabela de
+  telemetria da Fase 2), introduza Alembic.**
+
+## Deploy (VPS com Nginx + systemd + Postgres)
+
+1. Usuário `mallway`, pastas `/opt/mallway` (código), `/var/lib/mallway/public` (mapas e plantas, dono `mallway`),
+   `/var/www/mallway/dist` (build do app), `/etc/mallway/mallway.env` (veja `deploy/mallway.env.example`, perm. 640).
+2. Banco: `CREATE DATABASE mallway; CREATE USER mallway ...` e inclua `mallway` no `pg_dump` diário.
+3. `deploy/mallway-api.service` → `/etc/systemd/system/`; `deploy/nginx-mallway.conf` → sites do Nginx;
+   `certbot --nginx -d mallway.omniasoftwares.com`.
+4. Primeira carga: `python -m scripts.seed` e `python -m scripts.create_admin ...` no servidor.
+5. **Plantas enviadas ficam só em disco**: agende `deploy/backup-plantas.sh` (o `pg_dump` não as cobre).
+6. Atualizações: `./deploy/deploy.sh` (roda os testes antes de reiniciar).
+
+## O que ainda não existe
+
+Coleta de rotas e métricas reais (o painel de BI mostra **dados de exemplo**, avisado na tela), QR no balcão para medir o
+tempo cancela→balcão, gerador de placas em PDF, fotos de referência nas instruções, importação de lojas por planilha e
+cobrança. Roteiro completo em [`PLANO-COMERCIAL-3-FASES.md`](PLANO-COMERCIAL-3-FASES.md).
 
 ---
-
-## 📦 Estrutura de Pastas
-
-```
-barra-nav/
-├── public/
-│   ├── manifest.json              # Manifesto PWA para instalação no celular
-│   └── vite.svg
-├── src/
-│   ├── components/
-│   │   ├── AdminPanel.tsx         # Painel administrativo do shopping (CRUD + BI)
-│   │   ├── InteractiveMapCanvas.tsx # Motor de renderização SVG, Pan/Zoom e Heatmap
-│   │   ├── MasterAdmin.tsx        # Portal Master Multi-Shopping
-│   │   └── QRScannerModal.tsx     # Modal de captura e decodificação de QR Code
-│   ├── data/
-│   │   └── mallData.ts            # Grafos e lojas do Bangu, Barra e NorteShopping
-│   ├── screens/
-│   │   ├── Screen1QR.tsx          # Tela de boas-vindas com câmera e pontos de partida
-│   │   ├── Screen2Search.tsx       # Catálogo e busca instantânea de restaurantes/lojas
-│   │   ├── Screen3RoutePreview.tsx # Resumo do trajeto, distância e tempo estimado
-│   │   └── Screen4Map.tsx          # Navegação viva com áudio TTS, AR e odômetro
-│   ├── utils/
-│   │   ├── audioNavigation.ts     # Síntese de voz pt-BR e chimes polifônicos Waze
-│   │   └── pathfinding.ts         # Algoritmo de Dijkstra para menor caminho no grafo
-│   ├── App.tsx                    # Orquestrador com simulador de devices e switch de personas
-│   ├── index.css                  # Folha de estilos com regras mobile-first e safe areas
-│   └── main.tsx                   # Ponto de entrada React
-├── package.json
-├── tsconfig.json
-└── vite.config.ts
-```
-
----
-
-## 📄 Licença
 
 Propriedade de **Jean Guedes / Omnia Softwares**. Todos os direitos reservados.

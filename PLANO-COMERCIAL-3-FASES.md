@@ -236,3 +236,44 @@ em ≤ 3 dias, mostrar relatório mensal automático e entregar proposta no mesm
 1. **Risco nº 1 não é técnico**: é o shopping não deixar instalar placas. Mitigação: começar pelos restaurantes — placa no balcão e QR no saco/comanda são dentro da loja, não precisam de autorização do shopping; a administração entra depois, vendo os números.
 2. Mapa desatualizar e matar a confiança → loop de feedback (2.5) + operação gerenciada (3.2) existem exatamente para isso.
 3. Fadiga de dev solo com Omnia em paralelo → fases com critério de saída claro; nunca duas fases abertas ao mesmo tempo.
+
+---
+
+# Status da Fase 1 (atualizado em 13/11/2026)
+
+## Entregue
+- [x] Backend FastAPI: auth (JWT com revogação), rascunhos com controle de concorrência, publicação imutável,
+      rollback, upload de planta, feedback e beacon de erros, health check — 71 testes.
+- [x] Validador com simulação exaustiva (entrada × loja × 3 perfis) e fuzz contra entrada hostil.
+- [x] App do entregador: mapa publicado, cache offline por shopping, deep link de placa, scanner com `jsQR`
+      (iPhone), código digitável, câmera que desliga sozinha, erro de permissão cai na lista de entradas.
+- [x] Painel de publicação (checklist, calibração de escala, histórico, rollback), autosave com aviso de conflito.
+- [x] Mapas hardcoded removidos do bundle; bundle do entregador 591 KB → 365 KB (leitor de QR e gerador de placas
+      carregam sob demanda; código da equipe separado).
+- [x] Deploy: Nginx, systemd, backup das plantas, `deploy.sh`. README reescrito sem promessas falsas.
+
+## Desvios em relação ao plano (e por quê)
+- `draft_rev` (inteiro) no lugar de `draft_updated_at` para o controle de concorrência: compara-e-troca atômico no SQL,
+  sem depender de precisão de timestamp.
+- Seed **não publica** a v1: os 3 mapas só têm um erro bloqueante, a escala nunca calibrada, e publicar com escala
+  inventada seria exatamente o que o validador existe para impedir. Cada shopping precisa de calibração real antes.
+- Gerador de placas em PDF continua na Fase 2; já existe QR real para impressão (antes o painel só desenhava um ícone).
+
+## O que a verificação revelou (já corrigido)
+- Qualquer QR do mundo era aceito como "primeira entrada" (`|| entranceList[0]`); leitura disparava várias vezes.
+- iPhone não escaneava QR (`BarcodeDetector` não existe no Safari).
+- Destino da rota era escolhido por texto do label, com fallback silencioso para "Outback"/nó 0.
+- Loop infinito de renderização na tela de navegação (rota recalculada a cada render) e câmera de acompanhamento que
+  jogava a planta para fora da tela em mapas maiores que o celular (Bangu).
+- Distâncias gravadas do Bangu ~4× maiores que a geometria; desconto de 15% do corredor de serviço era somado como metro real.
+- Números inventados na interface (KPIs de SLA, "3min40s", "Ativo" em shopping nunca publicado, "GPS Indoor", distância
+  "até a próxima curva", fotos/legendas de passo).
+- Modal "Testar no celular" enviava o IP da rede local a um serviço externo de QR e trazia o IP de um desenvolvedor fixo.
+- Botões "Resetar catálogo" e lixeira de shopping removidos (sem equivalente seguro num sistema multi-shopping).
+
+## Pendências para fechar a Fase 1 em produção
+- [ ] Calibrar a escala de cada shopping com medida real (hoje só há valor de teste no banco local).
+- [ ] Criar banco/usuário Postgres, instalar serviço e Nginx, criar o admin master, `seed` e publicar o Bangu.
+- [ ] Incluir o banco `mallway` no `pg_dump` diário e agendar `deploy/backup-plantas.sh`.
+- [ ] Teste real num iPhone e num Android, no Wi-Fi do shopping (câmera, QR, modo offline).
+- [ ] Revisar no editor: `node-ent-fonseca` (Bangu) está fora da tela; Outback (Barra) não é acessível a cadeirante.

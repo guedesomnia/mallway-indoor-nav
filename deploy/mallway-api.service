@@ -1,0 +1,30 @@
+# /etc/systemd/system/mallway-api.service
+# Um único worker de propósito: o limite de tentativas de login vive em memória do processo.
+[Unit]
+Description=Mallway API (FastAPI)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=mallway
+Group=mallway
+WorkingDirectory=/opt/mallway/server
+EnvironmentFile=/etc/mallway/mallway.env
+ExecStart=/opt/mallway/server/.venv/bin/uvicorn app.main:get_app --factory \
+    --host 127.0.0.1 --port 8000 --workers 1 \
+    --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=on-failure
+RestartSec=3
+
+# Endurecimento: o serviço só escreve na pasta pública de mapas
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/mallway
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
